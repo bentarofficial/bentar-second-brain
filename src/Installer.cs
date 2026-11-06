@@ -1,0 +1,177 @@
+// Cài đặt / gỡ cài đặt cho riêng người dùng hiện tại (không cần quyền Admin)
+// Cài: chép app vào %LOCALAPPDATA%\Programs\Bentar Second Brain, tạo lối tắt Start Menu + Desktop, hiện trong Settings → Apps.
+// Gỡ: chỉ xoá những gì app tự cài. KHÔNG BAO GIỜ xoá file của người dùng; cài đặt, nhật ký, chỉ mục cũng được giữ lại.
+using System;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Reflection;
+using System.Text;
+using System.Windows.Forms;
+using Microsoft.Win32;
+
+static class Installer
+{
+    static readonly string Local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+    public static readonly string Dir = Path.Combine(Local, "Programs", Cleaner.AppName);
+    public static readonly string Exe = Path.Combine(Dir, Cleaner.AppName + ".exe");
+    static readonly string LegacyExe = Path.Combine(Cleaner.DataDir, "BentarSecondBrain.exe");   // nơi đặt app ở bản 2.4.x trở về trước
+    const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\BentarSecondBrain";
+    static readonly string StartLnk = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), Cleaner.AppName + ".lnk");
+    static readonly string DesktopLnk = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), Cleaner.AppName + ".lnk");
+    static readonly string NoPromptFile = Path.Combine(Cleaner.DataDir, "khong-hoi-cai-dat");
+
+    public static bool IsInstalled { get { return File.Exists(Exe); } }
+    public static bool RunningInstalled { get { return string.Equals(Path.GetFullPath(Application.ExecutablePath), Exe, StringComparison.OrdinalIgnoreCase); } }
+
+    public static Version InstalledVersion
+    {
+        get { try { return new Version(FileVersionInfo.GetVersionInfo(Exe).FileVersion); } catch { return new Version(0, 0); } }
+    }
+
+    // Gọi khi mở giao diện: mời cài nếu chưa cài, hoặc mời nâng bản đã cài nếu file đang chạy mới hơn.
+    // Trả về true nếu đã chuyển sang chạy bản đã cài (khi đó bản hiện tại nên thoát).
+    public static bool OfferOnStart()
+    {
+        if (RunningInstalled) return false;
+        if (!IsInstalled)
+        {
+            if (File.Exists(NoPromptFile)) return false;
+            var r = MessageBox.Show("Cài Bentar Second Brain vào máy?\n\n• Có lối tắt ở Start Menu và Desktop\n• Hiện trong Settings → Apps, gỡ được như app bình thường\n• Lịch dọn tự động và các agent dùng chung một bản, tự cập nhật\n\nChọn \"No\" để chạy tạm không cài (sẽ không hỏi lại; vẫn cài được bằng nút trong app).",
+                Cleaner.AppName, MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+            if (r == DialogResult.No) { try { Directory.CreateDirectory(Cleaner.DataDir); File.WriteAllText(NoPromptFile, ""); } catch { } return false; }
+            if (r != DialogResult.Yes) return false;
+        }
+        else
+        {
+            if (Updater.Current <= InstalledVersion) return false;
+            if (MessageBox.Show("Máy đang cài bản " + InstalledVersion.ToString(3) + ". Cập nhật lên bản " + Updater.Current.ToString(3) + " này?",
+                    Cleaner.AppName, MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return false;
+        }
+        try { Install(); }
+        catch (Exception ex) { MessageBox.Show("Cài đặt không thành công:\n" + ex.Message, Cleaner.AppName); return false; }
+        Process.Start(Exe);
+        return true;
+    }
+
+    public static void Install()
+    {
+        Directory.CreateDirectory(Dir);
+        CleanupOld();
+        CopyOver(Application.ExecutablePath, Exe);
+        Shortcut(StartLnk);
+        Shortcut(DesktopLnk);
+        Register();
+        try { File.Delete(NoPromptFile); } catch { }
+
+        // Chuyển lịch tự động và các agent đang dùng bản cũ trong AppData sang bản đã cài
+        try { if (Scheduler.Exists()) Scheduler.Enable(Settings.Load()); } catch { }
+        try { AgentLinks.ConnectAll(true); } catch { }
+        if (File.Exists(LegacyExe))
+        {
+            try { File.Delete(LegacyExe); }
+            catch { try { File.Move(LegacyExe, LegacyExe + "." + DateTime.Now.Ticks + ".old"); } catch { } }
+        }
+        Cleaner.Log("Đã cài Bentar Second Brain " + Updater.Current.ToString(3) + " vào " + Dir);
+    }
+
+    // Chép đè; nếu file đích đang chạy (agent đang dùng /mcp) thì Windows chỉ cho đổi tên, nên đổi tên bản cũ sang .old rồi chép
+    public static void CopyOver(string source, string target)
+    {
+        if (string.Equals(Path.GetFullPath(source), Path.GetFullPath(target), StringComparison.OrdinalIgnoreCase)) return;
+        if (File.Exists(target) && SameFile(source, target)) return;
+        try { File.Copy(source, target, true); }
+        catch (IOException)
+        {
+            File.Move(target, target + "." + DateTime.Now.Ticks + ".old");
+            File.Copy(source, target, false);
+        }
+    }
+
+    public static void CleanupOld()
+    {
+        foreach (var d in new[] { Dir, Cleaner.DataDir })
+            try { foreach (var f in Directory.GetFiles(d, "*.old")) try { File.Delete(f); } catch { } } catch { }
+    }
+
+    static bool SameFile(string a, string b)
+    {
+        if (new FileInfo(a).Length != new FileInfo(b).Length) return false;
+        using (var sha = System.Security.Cryptography.SHA256.Create())
+        using (var sa = File.Open(a, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+        using (var sb = File.Open(b, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+            return sha.ComputeHash(sa).SequenceEqual(sha.ComputeHash(sb));
+    }
+
+    static void Shortcut(string lnk)
+    {
+        var t = Type.GetTypeFromProgID("WScript.Shell");
+        object shell = Activator.CreateInstance(t);
+        object sc = t.InvokeMember("CreateShortcut", BindingFlags.InvokeMethod, null, shell, new object[] { lnk });
+        var st = sc.GetType();
+        Action<string, object> set = (k, v) => st.InvokeMember(k, BindingFlags.SetProperty, null, sc, new[] { v });
+        set("TargetPath", Exe);
+        set("WorkingDirectory", Dir);
+        set("IconLocation", Exe + ",0");
+        set("Description", "Dọn dẹp máy và bộ nhớ chung cho các agent");
+        st.InvokeMember("Save", BindingFlags.InvokeMethod, null, sc, null);
+    }
+
+    static void Register()
+    {
+        using (var k = Registry.CurrentUser.CreateSubKey(UninstallKey))
+        {
+            k.SetValue("DisplayName", Cleaner.AppName);
+            k.SetValue("DisplayVersion", Updater.Current.ToString(3));
+            k.SetValue("Publisher", "Bentar");
+            k.SetValue("DisplayIcon", Exe + ",0");
+            k.SetValue("InstallLocation", Dir);
+            k.SetValue("UninstallString", "\"" + Exe + "\" /uninstall");
+            k.SetValue("URLInfoAbout", "https://github.com/" + Updater.Repo);
+            k.SetValue("NoModify", 1, RegistryValueKind.DWord);
+            k.SetValue("NoRepair", 1, RegistryValueKind.DWord);
+            k.SetValue("EstimatedSize", (int)(new FileInfo(Exe).Length / 1024), RegistryValueKind.DWord);
+            k.SetValue("InstallDate", DateTime.Now.ToString("yyyyMMdd"));
+        }
+    }
+
+    // Cập nhật số phiên bản hiện trong Settings → Apps sau khi app tự cập nhật
+    public static void RefreshRegistration()
+    {
+        try
+        {
+            if (!RunningInstalled) return;
+            using (var k = Registry.CurrentUser.OpenSubKey(UninstallKey, true))
+                if (k != null && (k.GetValue("DisplayVersion") as string) != Updater.Current.ToString(3)) k.SetValue("DisplayVersion", Updater.Current.ToString(3));
+        }
+        catch { }
+    }
+
+    public static void Uninstall(bool quiet)
+    {
+        if (!quiet && MessageBox.Show("Gỡ Bentar Second Brain khỏi máy?\n\nApp chỉ xoá những gì nó đã cài: file chương trình, lối tắt, lịch dọn tự động và kết nối với các agent.\n\n" +
+                "File, tài liệu, dự án của bạn KHÔNG bị đụng tới. Cài đặt, nhật ký và chỉ mục Second Brain được giữ lại ở:\n" + Cleaner.DataDir,
+                Cleaner.AppName, MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+
+        try { Scheduler.Disable(); } catch { }
+        try { AgentLinks.DisconnectAll(); } catch { }
+        foreach (var l in new[] { StartLnk, DesktopLnk }) try { File.Delete(l); } catch { }
+        try { Registry.CurrentUser.DeleteSubKeyTree(UninstallKey, false); } catch { }
+        Cleaner.Log("Đã gỡ Bentar Second Brain (giữ lại cài đặt, nhật ký, chỉ mục)");
+
+        // File .exe có thể đang chạy (chính app này, hoặc agent dùng /mcp): một PowerShell chạy ngầm chờ app thoát,
+        // dừng các tiến trình chạy từ đúng các file chương trình, rồi xoá ĐÚNG các file đó (không xoá thư mục theo kiểu đệ quy).
+        Func<string, string> q = s => "'" + s.Replace("'", "''") + "'";
+        var targets = new[] { Exe, LegacyExe };
+        string script =
+            "$p=" + Process.GetCurrentProcess().Id + "; while(Get-Process -Id $p -ErrorAction SilentlyContinue){Start-Sleep -Milliseconds 300};" +
+            "$t=@(" + string.Join(",", targets.Select(q)) + ");" +
+            "Get-Process | Where-Object { $t -contains $_.Path } | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 500;" +
+            "foreach($f in $t){ Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue };" +
+            "foreach($d in @(" + q(Dir) + "," + q(Cleaner.DataDir) + ")){ Get-ChildItem -LiteralPath $d -Filter '*.old' -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue };" +
+            "if((Test-Path -LiteralPath " + q(Dir) + ") -and -not (Get-ChildItem -LiteralPath " + q(Dir) + " -Force)){ Remove-Item -LiteralPath " + q(Dir) + " -Force }";
+        Process.Start(new ProcessStartInfo("powershell.exe", "-NoProfile -WindowStyle Hidden -EncodedCommand " + Convert.ToBase64String(Encoding.Unicode.GetBytes(script)))
+            { CreateNoWindow = true, UseShellExecute = false });
+        if (!quiet) MessageBox.Show("Đã gỡ Bentar Second Brain.\nDữ liệu của bạn được giữ nguyên.", Cleaner.AppName);
+    }
+}

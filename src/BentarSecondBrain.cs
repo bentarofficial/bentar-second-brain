@@ -13,12 +13,12 @@ using System.Windows.Forms;
 
 [assembly: System.Reflection.AssemblyTitle("Bentar Second Brain")]
 [assembly: System.Reflection.AssemblyProduct("Bentar Second Brain")]
-[assembly: System.Reflection.AssemblyVersion("2.4.1.0")]
+[assembly: System.Reflection.AssemblyVersion("2.5.1.0")]
 
 // Cập nhật từ GitHub Releases: so sánh tag (vd "v2.1.0") với phiên bản app, tải file .exe mới rồi tự thay thế
 static class Updater
 {
-    const string Repo = "bentarofficial/bentar-second-brain";
+    public const string Repo = "bentarofficial/bentar-second-brain";
     public static readonly Version Current = typeof(Updater).Assembly.GetName().Version;
 
     public class Release { public Version Version; public string Tag, ExeUrl, Notes; }
@@ -53,7 +53,7 @@ static class Updater
         using (var wc = Client()) wc.DownloadFile(r.ExeUrl, newExe);
         if (new FileInfo(newExe).Length < 10 * 1024) throw new Exception("File tải về không hợp lệ.");
 
-        string installed = Path.Combine(Cleaner.DataDir, "BentarSecondBrain.exe");   // bản dùng cho lịch tự động
+        string installed = Installer.Exe;   // bản đã cài (lịch tự động và agent dùng chung)
         Func<string, string> q = s => "'" + s.Replace("'", "''") + "'";
         string script =
             "$p=" + Process.GetCurrentProcess().Id + "; while(Get-Process -Id $p -ErrorAction SilentlyContinue){Start-Sleep -Milliseconds 300};" +
@@ -263,7 +263,7 @@ class Settings
 static class Scheduler
 {
     const string TaskName = "Bentar Second Brain - Tu dong don dep";
-    static readonly string InstalledExe = Path.Combine(Cleaner.DataDir, "BentarSecondBrain.exe");
+    static string InstalledExe { get { return Installer.Exe; } }
 
     static int Schtasks(string args)
     {
@@ -271,12 +271,11 @@ static class Scheduler
         using (var p = Process.Start(psi)) { p.WaitForExit(); return p.ExitCode; }
     }
 
-    // Chép app vào AppData để lịch vẫn chạy được dù bạn di chuyển/xoá file .exe gốc
+    // Lịch luôn chạy bản đã cài, để vẫn chạy được dù bạn di chuyển/xoá file .exe gốc
     public static void Enable(Settings s)
     {
         Directory.CreateDirectory(Cleaner.DataDir);
-        if (!string.Equals(Application.ExecutablePath, InstalledExe, StringComparison.OrdinalIgnoreCase))
-            File.Copy(Application.ExecutablePath, InstalledExe, true);
+        if (!Installer.IsInstalled) Installer.Install();
 
         string user = Environment.UserDomainName + "\\" + Environment.UserName;
         string trigger;
@@ -635,8 +634,9 @@ class MainForm : Form
         Text = Cleaner.AppName;
         ClientSize = new Size(760, 702);
         StartPosition = FormStartPosition.CenterScreen;
-        FormBorderStyle = FormBorderStyle.FixedSingle;
-        MaximizeBox = false;
+        FormBorderStyle = FormBorderStyle.Sizable;
+        MaximizeBox = true;
+        MinimumSize = SizeFromClientSize(new Size(760, 702));
         Font = new Font("Segoe UI", 10);
         try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
 
@@ -777,8 +777,55 @@ class MainForm : Form
         btnUpdate.SetBounds(584, 14, 160, 32);
         btnUpdate.Click += async (s, e) => await CheckUpdate(true);
         Controls.AddRange(new Control[] { title, lblVer, btnUpdate, lblDisk, btnScan, lblStatus, tabs, grp });
+        if (!Installer.RunningInstalled)
+        {
+            var btnInstall = new Button { Text = Installer.IsInstalled ? "Mở bản đã cài" : "Cài vào máy" };
+            btnInstall.SetBounds(330, 14, 130, 32);
+            btnInstall.Click += (s, e) =>
+            {
+                try { if (!Installer.IsInstalled || Updater.Current > Installer.InstalledVersion) Installer.Install(); Process.Start(Installer.Exe); Close(); }
+                catch (Exception ex) { MessageBox.Show("Cài đặt không thành công:\n" + ex.Message, Text); }
+            };
+            Controls.Add(btnInstall);
+            btnInstall.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        }
+        // Neo khi cửa sổ vừa hiện (các tab đã có kích thước thật), trước khi người dùng kéo giãn
+        Shown += (s, e) => MakeResizable(tabs, grp, lblVer);
         Shown += async (s, e) => await CheckUpdate(false);
         UpdateInfo();
+    }
+
+    // Neo các thành phần để cửa sổ kéo giãn / phóng toàn màn hình: danh sách giãn theo khung,
+    // nút dưới mỗi tab bám đáy, nhóm "Tự động dọn dẹp" bám đáy cửa sổ, cột cuối của danh sách lấp chỗ trống
+    void MakeResizable(TabControl tabs, GroupBox grp, Label lblVer)
+    {
+        const AnchorStyles T = AnchorStyles.Top, B = AnchorStyles.Bottom, L = AnchorStyles.Left, R = AnchorStyles.Right;
+        tabs.Anchor = T | B | L | R;
+        grp.Anchor = B | L | R;
+        lblStatus.Anchor = lblDisk.Anchor = T | L | R;
+        btnUpdate.Anchor = lblVer.Anchor = T | R;
+        lblLast.Anchor = T | L | R;
+        foreach (TabPage page in tabs.TabPages)
+            foreach (Control c in page.Controls)
+            {
+                var lv = c as ListView;
+                if (lv != null)
+                {
+                    lv.Anchor = T | B | L | R;
+                    lv.Resize += (s, e) => FillLastColumn(lv);
+                }
+                else if (c.Top >= 280) c.Anchor = B | L;   // hàng nút và ghi chú dưới danh sách
+                else if (c is Button) c.Anchor = T | R;      // nút "Tìm"
+                else c.Anchor = T | L | R;                    // ô tìm kiếm, dòng trạng thái
+            }
+    }
+
+    static void FillLastColumn(ListView lv)
+    {
+        if (lv.Columns.Count == 0) return;
+        int used = 0;
+        for (int i = 0; i < lv.Columns.Count - 1; i++) used += lv.Columns[i].Width;
+        lv.Columns[lv.Columns.Count - 1].Width = Math.Max(120, lv.ClientSize.Width - used - 4);
     }
 
     // --- Tab 5: Second Brain – chỉ mục toàn máy cho agent tra cứu ---
@@ -847,9 +894,9 @@ class MainForm : Form
     // Cài app vào AppData rồi đăng ký Second Brain làm máy chủ MCP cho mọi agent có trên máy
     async Task ConnectAgents()
     {
-        try { AgentLinks.InstallExe(Application.ExecutablePath); }
-        catch (Exception ex) { MessageBox.Show("Không cài được app vào " + AgentLinks.InstalledExe + ":\n" + ex.Message, Text); return; }
-        var lines = await Task.Run(() => AgentLinks.ConnectAll());
+        try { if (!Installer.IsInstalled) Installer.Install(); }
+        catch (Exception ex) { MessageBox.Show("Không cài được app vào " + Installer.Dir + ":\n" + ex.Message, Text); return; }
+        var lines = await Task.Run(() => AgentLinks.ConnectAll(false));
         MessageBox.Show(lines.Count == 0 ? "Không tìm thấy agent nào trên máy (Claude Code, Claude Desktop, Cursor, Windsurf, Codex, Gemini CLI)." :
             "Kết nối Second Brain:\n\n" + string.Join("\n", lines) + "\n\nMở phiên agent MỚI là dùng được.", Text);
     }
@@ -1159,18 +1206,24 @@ class MainForm : Form
         if (args.Length == 2 && args[0].Equals("/report", StringComparison.OrdinalIgnoreCase)) { WriteReport(args[1]); return; }
         // /mcp: máy chủ MCP cho coding agent; /index: cập nhật chỉ mục Second Brain rồi thoát
         if (args.Any(a => a.Equals("/mcp", StringComparison.OrdinalIgnoreCase))) { McpServer.Run(); return; }
+        // /install: cài vào máy (lối tắt, Settings → Apps); /uninstall [/quiet]: gỡ, giữ nguyên dữ liệu người dùng
+        if (args.Any(a => a.Equals("/install", StringComparison.OrdinalIgnoreCase))) { Installer.Install(); return; }
+        if (args.Any(a => a.Equals("/uninstall", StringComparison.OrdinalIgnoreCase))) { Installer.Uninstall(args.Any(a => a.Equals("/quiet", StringComparison.OrdinalIgnoreCase))); return; }
         if (args.Any(a => a.Equals("/index", StringComparison.OrdinalIgnoreCase))) { Brain.Build(); return; }
         // /connect: cài app vào AppData và kết nối Second Brain với mọi agent trên máy, in kết quả ra stdout
         if (args.Any(a => a.Equals("/connect", StringComparison.OrdinalIgnoreCase)))
         {
             using (var o = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false)) { AutoFlush = true })
             {
-                try { AgentLinks.InstallExe(Application.ExecutablePath); o.WriteLine("Đã cài: " + AgentLinks.InstalledExe); }
+                try { if (!Installer.IsInstalled) Installer.Install(); o.WriteLine("App đã cài: " + Installer.Exe); }
                 catch (Exception ex) { o.WriteLine("Lỗi cài app: " + ex.Message); Environment.Exit(1); }
-                foreach (var l in AgentLinks.ConnectAll()) o.WriteLine(l);
+                foreach (var l in AgentLinks.ConnectAll(false)) o.WriteLine(l);
             }
             return;
         }
+        if (Installer.OfferOnStart()) return;   // đã chuyển sang mở bản vừa cài
+        Installer.RefreshRegistration();
+        Installer.CleanupOld();
         Application.Run(new MainForm());
     }
 }
