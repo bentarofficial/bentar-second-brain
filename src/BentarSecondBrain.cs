@@ -13,7 +13,7 @@ using System.Windows.Forms;
 
 [assembly: System.Reflection.AssemblyTitle("Bentar Second Brain")]
 [assembly: System.Reflection.AssemblyProduct("Bentar Second Brain")]
-[assembly: System.Reflection.AssemblyVersion("2.8.0.0")]
+[assembly: System.Reflection.AssemblyVersion("2.9.0.0")]
 
 // Cập nhật từ GitHub Releases: so sánh tag (vd "v2.1.0") với phiên bản app, tải file .exe mới rồi tự thay thế
 static class Updater
@@ -612,7 +612,7 @@ static class Analyzer
     }
 }
 
-class MainForm : Form
+partial class MainForm : Form
 {
     readonly ListView review = new ListView(), keep = new ListView();
     readonly Button btnOpen = new Button(), btnRecycle = new Button(), btnMove = new Button();
@@ -640,307 +640,8 @@ class MainForm : Form
         Font = new Font("Segoe UI", 10);
         try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
 
-        var title = new Label { Text = Cleaner.AppName, Font = new Font("Segoe UI", 16, FontStyle.Bold),
-            ForeColor = Color.FromArgb(0, 102, 204), AutoSize = true, Location = new Point(16, 12) };
-        lblDisk.SetBounds(18, 50, 600, 22);
-
-        list.View = View.Details;
-        list.CheckBoxes = true;
-        list.FullRowSelect = true;
-        list.SetBounds(8, 8, 700, 270);
-        list.Columns.Add("Mục dọn dẹp (an toàn – app tự xoá được)", 500);
-        list.Columns.Add("Dung lượng", 160);
-        foreach (var it in items)
-        {
-            bool on = settings.Loaded ? settings.Selected.Contains(it.Id) : it.DefaultOn;
-            list.Items.Add(new ListViewItem(new[] { it.Name, "—" }) { Checked = on, Tag = it });
-        }
-
-        btnScan.Text = "Quét toàn bộ";
-        btnScan.SetBounds(16, 78, 170, 40);
-        btnScan.Click += async (s, e) => await Scan();
-
-        btnClean.Text = "Dọn mục an toàn";
-        btnClean.SetBounds(8, 286, 170, 36);
-        btnClean.BackColor = Color.FromArgb(0, 153, 76);
-        btnClean.ForeColor = Color.White;
-        btnClean.FlatStyle = FlatStyle.Flat;
-        btnClean.Click += async (s, e) => await CleanNow();
-
-        // --- Tab 2: cần người dùng xem xét ---
-        review.View = View.Details;
-        review.CheckBoxes = true;
-        review.FullRowSelect = true;
-        review.SetBounds(8, 8, 700, 270);
-        review.Columns.Add("File / thư mục", 230);
-        review.Columns.Add("Dung lượng", 85);
-        review.Columns.Add("Ngày sửa", 85);
-        review.Columns.Add("Vì sao nên xem xét", 290);
-        review.DoubleClick += (s, e) => OpenLocation();
-        btnOpen.Text = "Mở vị trí";
-        btnOpen.SetBounds(8, 286, 120, 36);
-        btnOpen.Click += (s, e) => OpenLocation();
-        btnRecycle.Text = "Chuyển vào Thùng rác";
-        btnRecycle.SetBounds(136, 286, 180, 36);
-        btnRecycle.Click += async (s, e) => await ReviewAction(false);
-        btnMove.Text = "Chuyển sang ổ D";
-        btnMove.SetBounds(324, 286, 160, 36);
-        btnMove.Click += async (s, e) => await ReviewAction(true);
-
-        // --- Tab 3: cần giữ ---
-        keep.View = View.Details;
-        keep.FullRowSelect = true;
-        keep.SetBounds(8, 8, 700, 314);
-        keep.Columns.Add("Mục", 270);
-        keep.Columns.Add("Dung lượng", 90);
-        keep.Columns.Add("Vì sao cần giữ", 330);
-        foreach (var k in Analyzer.KeepItems()) keep.Items.Add(new ListViewItem(new[] { k.Name, "—", k.Why }) { Tag = k });
-
-        // --- Tab 4: đánh giá thư mục lâu không dùng (chỉ gợi ý, người dùng tự tích & xoá) ---
-        stale.View = View.Details;
-        stale.CheckBoxes = true;
-        stale.FullRowSelect = true;
-        stale.ShowItemToolTips = true;
-        stale.SetBounds(8, 8, 700, 270);
-        stale.Columns.Add("Thư mục", 230);
-        stale.Columns.Add("Dung lượng", 80);
-        stale.Columns.Add("Dùng lần cuối", 95);
-        stale.Columns.Add("Đánh giá", 285);
-        stale.DoubleClick += (s, e) => OpenStale();
-        btnStaleOpen.Text = "Mở thư mục";
-        btnStaleOpen.SetBounds(8, 286, 120, 36);
-        btnStaleOpen.Click += (s, e) => OpenStale();
-        btnStaleRecycle.Text = "Chuyển thư mục đã tích vào Thùng rác";
-        btnStaleRecycle.SetBounds(136, 286, 280, 36);
-        btnStaleRecycle.Click += async (s, e) => await RecycleStale();
-        var staleNote = new Label { Text = "Đánh giá theo lần sửa file gần nhất + lịch sử mở file của Windows + dấu vết AI (.claude, .git...).\nApp KHÔNG tự xoá – bạn tự xem và tích.",
-            Location = new Point(424, 284), Size = new Size(290, 44), ForeColor = Color.DimGray, Font = new Font("Segoe UI", 8) };
-
-        var tabs = new TabControl();
-        tabs.SetBounds(16, 126, 728, 360);
-        var t1 = new TabPage("1. Xoá an toàn (tự động)");
-        var t2 = new TabPage("2. Cần bạn xem xét");
-        var t3 = new TabPage("3. Cần giữ – không nên xoá");
-        t1.Controls.AddRange(new Control[] { list, btnClean });
-        t2.Controls.AddRange(new Control[] { review, btnOpen, btnRecycle, btnMove });
-        t3.Controls.Add(keep);
-        var t4 = new TabPage("4. Thư mục lâu không dùng");
-        t4.Controls.AddRange(new Control[] { stale, btnStaleOpen, btnStaleRecycle, staleNote });
-        tabs.TabPages.AddRange(new[] { BuildMapTab(), t1, t2, t4, t3, BuildBrainTab() });
-
-        lblStatus.SetBounds(196, 76, 548, 46);
-        lblStatus.Text = "Bấm \"Quét toàn bộ\" để app phân loại file trên ổ C thành 3 nhóm.\nApp chỉ TỰ XOÁ nhóm 1; nhóm 2 bạn tự quyết; nhóm 3 không bao giờ bị đụng tới.";
-
-        // --- Tự động dọn dẹp ---
-        var grp = new GroupBox { Text = "Tự động dọn dẹp (chỉ nhóm 1)", Location = new Point(16, 494), Size = new Size(728, 196) };
-        chkAuto.Text = "Bật tự động dọn dẹp (dọn ngầm các mục đang tích ở danh sách trên)";
-        chkAuto.SetBounds(14, 26, 580, 24);
-        chkAuto.Checked = settings.AutoEnabled && Scheduler.Exists();
-
-        var lblFreq = new Label { Text = "Tần suất:", Location = new Point(14, 62), AutoSize = true };
-        cboFreq.DropDownStyle = ComboBoxStyle.DropDownList;
-        cboFreq.Items.AddRange(new object[] { "Hằng ngày", "Mỗi 3 ngày", "Hằng tuần", "Mỗi khi bật máy" });
-        cboFreq.SelectedIndex = Math.Max(0, Math.Min(3, settings.Frequency));
-        cboFreq.SetBounds(90, 58, 170, 28);
-
-        var lblTime = new Label { Text = "Lúc:", Location = new Point(280, 62), AutoSize = true };
-        dtTime.Format = DateTimePickerFormat.Custom;
-        dtTime.CustomFormat = "HH:mm";
-        dtTime.ShowUpDown = true;
-        dtTime.SetBounds(320, 58, 90, 28);
-        DateTime t;
-        dtTime.Value = DateTime.TryParse(settings.Time, out t) ? DateTime.Today.Add(t.TimeOfDay) : DateTime.Today.AddHours(12);
-        cboFreq.SelectedIndexChanged += (s, e) => dtTime.Enabled = cboFreq.SelectedIndex != 3;
-        dtTime.Enabled = cboFreq.SelectedIndex != 3;
-
-        chkRecycle.Text = "Cho phép tự động dọn cả Thùng rác (không khôi phục được)";
-        chkRecycle.SetBounds(14, 94, 580, 24);
-        chkRecycle.Checked = settings.AutoRecycle;
-        chkNotify.Text = "Hiện thông báo nhỏ sau mỗi lần tự động dọn";
-        chkNotify.SetBounds(14, 120, 580, 24);
-        chkNotify.Checked = settings.Notify;
-
-        btnSave.Text = "Lưu cài đặt";
-        btnSave.SetBounds(14, 150, 140, 34);
-        btnSave.Click += (s, e) => SaveSettings();
-        btnLog.Text = "Xem nhật ký";
-        btnLog.SetBounds(164, 150, 120, 34);
-        btnLog.Click += (s, e) => { if (File.Exists(Cleaner.LogFile)) Process.Start("notepad.exe", "\"" + Cleaner.LogFile + "\""); else MessageBox.Show("Chưa có lần dọn nào.", Text); };
-        lblLast.SetBounds(294, 150, 420, 40);
-        lblLast.ForeColor = Color.DimGray;
-        lblLast.Font = new Font("Segoe UI", 8.5f);
-
-        grp.Controls.AddRange(new Control[] { chkAuto, lblFreq, cboFreq, lblTime, dtTime, chkRecycle, chkNotify, btnSave, btnLog, lblLast });
-        var lblVer = new Label { Text = "Phiên bản " + Updater.Current.ToString(3), AutoSize = true, ForeColor = Color.DimGray,
-            Font = new Font("Segoe UI", 8.5f), Location = new Point(470, 22) };
-        btnUpdate.Text = "Kiểm tra cập nhật";
-        btnUpdate.SetBounds(584, 14, 160, 32);
-        btnUpdate.Click += async (s, e) => await CheckUpdate(true);
-        Controls.AddRange(new Control[] { title, lblVer, btnUpdate, lblDisk, btnScan, lblStatus, tabs, grp });
-        if (!Installer.RunningInstalled)
-        {
-            var btnInstall = new Button { Text = Installer.IsInstalled ? "Mở bản đã cài" : "Cài vào máy" };
-            btnInstall.SetBounds(330, 14, 130, 32);
-            btnInstall.Click += (s, e) =>
-            {
-                try { if (!Installer.IsInstalled || Updater.Current > Installer.InstalledVersion) Installer.Install(); Process.Start(Installer.Exe); Close(); }
-                catch (Exception ex) { MessageBox.Show("Cài đặt không thành công:\n" + ex.Message, Text); }
-            };
-            Controls.Add(btnInstall);
-            btnInstall.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-        }
-        // Neo khi cửa sổ vừa hiện (các tab đã có kích thước thật), trước khi người dùng kéo giãn
-        Shown += (s, e) => MakeResizable(tabs, grp, lblVer);
-        Shown += async (s, e) => await CheckUpdate(false);
-        Shown += (s, e) => BeginInvoke(new Action(() => BackupUI.FirstRun(this)));   // lần đầu: khôi phục / tạo mới + sao lưu / để sau
+        BuildShell();   // khung giao diện: xem MainShell.cs
         UpdateInfo();
-    }
-
-    // Neo các thành phần để cửa sổ kéo giãn / phóng toàn màn hình: danh sách giãn theo khung,
-    // nút dưới mỗi tab bám đáy, nhóm "Tự động dọn dẹp" bám đáy cửa sổ, cột cuối của danh sách lấp chỗ trống
-    void MakeResizable(TabControl tabs, GroupBox grp, Label lblVer)
-    {
-        const AnchorStyles T = AnchorStyles.Top, B = AnchorStyles.Bottom, L = AnchorStyles.Left, R = AnchorStyles.Right;
-        tabs.Anchor = T | B | L | R;
-        grp.Anchor = B | L | R;
-        lblStatus.Anchor = lblDisk.Anchor = T | L | R;
-        btnUpdate.Anchor = lblVer.Anchor = T | R;
-        lblLast.Anchor = T | L | R;
-        foreach (TabPage page in tabs.TabPages)
-            foreach (Control c in page.Controls)
-            {
-                var lv = c as ListView;
-                if (c is BrainMap) c.Anchor = T | B | L | R;
-                else if (c is TextBox && page.Controls.OfType<BrainMap>().Any()) c.Anchor = T | L;   // ô tìm trên bản đồ giữ cỡ cố định
-                else if (lv != null)
-                {
-                    lv.Anchor = T | B | L | R;
-                    lv.Resize += (s, e) => FillLastColumn(lv);
-                }
-                else if (c.Top >= 280) c.Anchor = B | L;   // hàng nút và ghi chú dưới danh sách
-                else if (c is Button) c.Anchor = T | R;      // nút "Tìm"
-                else c.Anchor = T | L | R;                    // ô tìm kiếm, dòng trạng thái
-            }
-    }
-
-    static void FillLastColumn(ListView lv)
-    {
-        if (lv.Columns.Count == 0) return;
-        int used = 0;
-        for (int i = 0; i < lv.Columns.Count - 1; i++) used += lv.Columns[i].Width;
-        lv.Columns[lv.Columns.Count - 1].Width = Math.Max(120, lv.ClientSize.Width - used - 4);
-    }
-
-    // --- Tab đầu: bản đồ bộ não (nơ-ron, khớp thần kinh, hoạt động thật của agent) ---
-    TabPage BuildMapTab()
-    {
-        var t = new TabPage("Bộ não") { BackColor = Color.FromArgb(8, 12, 28) };
-        var map = new BrainMap();
-        map.SetBounds(0, 34, 720, 296);
-        var txt = new TextBox();
-        txt.SetBounds(6, 5, 300, 24);
-        var lbl = new Label { ForeColor = Color.FromArgb(170, 190, 230), BackColor = Color.Transparent, Font = new Font("Segoe UI", 8.5f) };
-        lbl.SetBounds(314, 8, 400, 20);
-        lbl.Text = "Gõ để tìm trên bản đồ · nhấp một nơ-ron để xem · nhấp đúp để mở";
-        map.StatusChanged += s => lbl.Text = s;
-        txt.KeyDown += (s, e) =>
-        {
-            if (e.KeyCode != Keys.Enter) return;
-            e.SuppressKeyPress = true;
-            int n = map.Highlight(txt.Text);
-            lbl.Text = txt.Text.Trim().Length == 0 ? "" : "\"" + txt.Text.Trim() + "\": " + n + " nơ-ron sáng lên";
-        };
-        t.Controls.AddRange(new Control[] { txt, lbl, map });
-        t.VisibleChanged += (s, e) => { if (t.Visible) map.Reload(); };
-        map.Reload();
-        return t;
-    }
-
-    // --- Tab 5: Second Brain – chỉ mục toàn máy cho agent tra cứu ---
-    readonly Label lblBrain = new Label(), lblBackup = new Label();
-    int backupTick;
-    readonly TextBox txtBrain = new TextBox();
-    readonly ListView brainHits = new ListView();
-
-    TabPage BuildBrainTab()
-    {
-        var t = new TabPage("5. Second Brain");
-        lblBrain.SetBounds(8, 6, 700, 40);
-        lblBrain.Font = new Font("Segoe UI", 8.5f);
-        txtBrain.SetBounds(8, 50, 560, 26);
-        var btnFind = new Button { Text = "Tìm" };
-        btnFind.SetBounds(576, 48, 132, 30);
-        brainHits.View = View.Details;
-        brainHits.FullRowSelect = true;
-        brainHits.ShowItemToolTips = true;
-        brainHits.SetBounds(8, 84, 700, 194);
-        brainHits.Columns.Add("File", 260);
-        brainHits.Columns.Add("Sửa", 80);
-        brainHits.Columns.Add("Đoạn khớp", 340);
-        brainHits.DoubleClick += (s, e) => { if (brainHits.SelectedItems.Count > 0) Process.Start("explorer.exe", "/select,\"" + brainHits.SelectedItems[0].Tag + "\""); };
-        Func<Task> find = async () =>
-        {
-            var q = txtBrain.Text;
-            var hits = await Task.Run(() => Brain.Search(q, null, null, false, 50));
-            brainHits.Items.Clear();
-            foreach (var h in hits)
-            {
-                var snip = (h.Snippet ?? "").Replace("\r", "").Replace("\n", "  ·  ");
-                brainHits.Items.Add(new ListViewItem(new[] { h.File.Path, DateTime.FromBinary(h.File.Mtime).ToString("dd/MM/yyyy"), snip })
-                    { Tag = h.File.Path, ToolTipText = h.File.Path + "\n" + h.Snippet });
-            }
-            if (hits.Count == 0) brainHits.Items.Add(new ListViewItem(new[] { "Không tìm thấy.", "", "" }));
-        };
-        btnFind.Click += async (s, e) => await find();
-        txtBrain.KeyDown += async (s, e) => { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; await find(); } };
-
-        var btnIndex = new Button { Text = "Cập nhật chỉ mục" };
-        btnIndex.SetBounds(8, 286, 160, 36);
-        btnIndex.Click += (s, e) => { if (!Brain.Building) Task.Run(() => { try { Brain.Build(); } catch (Exception ex) { Brain.Progress = "Lỗi: " + ex.Message; } }); };
-        var btnConnect = new Button { Text = "Kết nối các agent", BackColor = Color.FromArgb(58, 42, 160), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
-        btnConnect.SetBounds(176, 286, 180, 36);
-        btnConnect.Click += async (s, e) => await ConnectAgents();
-        // Giữ bộ não cả đời: sao lưu mã hoá lên GitHub riêng tư, khôi phục khi đổi / mất máy
-        var btnBackup = new Button { Text = Backup.Configured ? "Sao lưu ngay" : "Sao lưu bộ não" };
-        btnBackup.SetBounds(364, 286, 130, 36);
-        btnBackup.Click += async (s, e) =>
-        {
-            if (!Backup.Configured) { BackupUI.Setup(this); btnBackup.Text = Backup.Configured ? "Sao lưu ngay" : "Sao lưu bộ não"; return; }
-            btnBackup.Enabled = false;
-            var r = await Task.Run(() => Backup.Run(true));
-            btnBackup.Enabled = true;
-            MessageBox.Show(this, r, Text);
-        };
-        var btnRestore = new Button { Text = "Khôi phục" };
-        btnRestore.SetBounds(500, 286, 100, 36);
-        btnRestore.Click += (s, e) => BackupUI.Restore(this);
-        lblBackup.SetBounds(606, 284, 104, 40);
-        lblBackup.Font = new Font("Segoe UI", 7.5f);
-        t.Controls.AddRange(new Control[] { lblBrain, txtBrain, btnFind, brainHits, btnIndex, btnConnect, btnBackup, btnRestore, lblBackup });
-
-        var timer = new Timer { Interval = 1000 };
-        timer.Tick += (s, e) => ShowBrainStatus();
-        timer.Start();
-        Task.Run(() => { Brain.EnsureLoaded(); Brain.RefreshIfStale(TimeSpan.FromHours(6)); });
-        return t;
-    }
-
-    void ShowBrainStatus()
-    {
-        if (backupTick++ % 10 == 0)   // trạng thái sao lưu: báo đỏ nếu chưa sao lưu / lỗi / quá 3 ngày
-        {
-            var w = Backup.Warning();
-            DateTime ok;
-            lblBackup.ForeColor = w != null ? Color.Firebrick : Color.SeaGreen;
-            lblBackup.Text = w ?? ("Đã sao lưu " + (DateTime.TryParse(Backup.Status().LastOk, out ok) ? ok.ToString("HH:mm dd/MM") : ""));
-        }
-        var p = Brain.Progress;
-        if (p.Length > 110) p = "…" + p.Substring(p.Length - 110);
-        Tuple<int, int> mc;
-        try { mc = Memory.Counts(); } catch { mc = Tuple.Create(0, 0); }
-        lblBrain.Text = "Chỉ mục: " + Brain.FileCount.ToString("N0") + " file, " + Brain.ProjectCount + " dự án · Trí nhớ: " + mc.Item1 + " ghi nhớ, " + mc.Item2 + " liên kết · cập nhật " +
-            (Brain.BuiltAt == DateTime.MinValue ? "chưa có" : Brain.BuiltAt.ToString("dd/MM/yyyy HH:mm")) +
-            (Brain.Building ? "\n" + p : "\nGõ từ khoá để tìm trên toàn máy (không cần gõ dấu).");
     }
 
     // Cài app vào AppData rồi đăng ký Second Brain làm máy chủ MCP cho mọi agent có trên máy
@@ -996,8 +697,8 @@ class MainForm : Form
         foreach (var r in ratings)
         {
             var row = new ListViewItem(new[] { r.Path, Cleaner.Fmt(r.Size), r.LastUsed.ToString("dd/MM/yyyy"), r.Rating }) { Tag = r, ToolTipText = r.Path };
-            if (r.Days >= 365 || r.Files == 0) row.BackColor = Color.FromArgb(255, 236, 230);
-            else if (r.Ai || r.Days < 60) row.BackColor = Color.FromArgb(230, 245, 233);
+            if (r.Days >= 365 || r.Files == 0) row.BackColor = Color.FromArgb(70, 32, 38);
+            else if (r.Ai || r.Days < 60) row.BackColor = Color.FromArgb(24, 58, 44);
             stale.Items.Add(row);
         }
 
@@ -1292,6 +993,13 @@ class MainForm : Form
                 foreach (var l in AgentLinks.ConnectAll(false)) o.WriteLine(l);
             }
             return;
+        }
+        // Bị mở bằng quyền Administrator: mở lại ở chế độ thường (qua Explorer). Chạy Admin thì Windows không cho đọc
+        // đăng nhập GitHub / Git của người dùng, nên sao lưu và các công cụ khác hỏng. Thêm /admin nếu thật sự cần quyền Admin.
+        if (!args.Any(a => a.Equals("/admin", StringComparison.OrdinalIgnoreCase)) &&
+            new System.Security.Principal.WindowsPrincipal(System.Security.Principal.WindowsIdentity.GetCurrent()).IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator))
+        {
+            try { Process.Start("explorer.exe", "\"" + Application.ExecutablePath + "\""); return; } catch { }
         }
         if (Installer.OfferOnStart()) return;   // đã chuyển sang mở bản vừa cài
         Installer.RefreshRegistration();

@@ -195,6 +195,8 @@ class BrainMap : Control
             {
                 // Ghi nhớ nạp ngay; danh sách dự án cần chỉ mục (lần đầu nạp vài giây) nên vẽ sau
                 var snap = Memory.Snapshot();
+                var devs = Activity.Devices(30).Where(d => d.Name != "trạm phát" && d.Name != "sao lưu").Take(14).ToList();
+                if (IsHandleCreated) BeginInvoke(new Action(() => ApplyDevices(devs)));
                 if (cachedProjects == null && IsHandleCreated) BeginInvoke(new Action(() => Apply(snap.Item1, snap.Item2, new List<BrainProject>())));
                 var projects = Brain.Projects(null);
                 if (IsHandleCreated) BeginInvoke(new Action(() => { cachedProjects = projects; Apply(snap.Item1, snap.Item2, projects); loading = false; }));
@@ -205,6 +207,21 @@ class BrainMap : Control
     }
     List<BrainProject> cachedProjects;
     string lastStatus;
+
+    // Bóng đèn: các agent / công cụ đã cắm vào bộ não (từ nhật ký hoạt động)
+    class Bulb { public string Name; public DateTime LastSeen; public int Uses; public float Flash; }
+    readonly List<Bulb> bulbs = new List<Bulb>();
+
+    void ApplyDevices(List<Device> devs)
+    {
+        foreach (var d in devs)
+        {
+            var b = bulbs.FirstOrDefault(x => string.Equals(x.Name, d.Name, StringComparison.OrdinalIgnoreCase));
+            if (b == null) bulbs.Add(b = new Bulb { Name = d.Name, LastSeen = d.LastSeen, Uses = d.Uses, Flash = firstLoad ? 0 : 1 });
+            else if (d.LastSeen > b.LastSeen) { b.Flash = 1; b.LastSeen = d.LastSeen; b.Uses = d.Uses; }
+        }
+        bulbs.RemoveAll(b => !devs.Any(d => string.Equals(d.Name, b.Name, StringComparison.OrdinalIgnoreCase)));
+    }
 
     static bool IsMemoryKind(string k) { return k != "du-an" && k != "file"; }
 
@@ -324,6 +341,7 @@ class BrainMap : Control
     void Step()
     {
         time += 0.033f;
+        foreach (var b in bulbs) b.Flash = Math.Max(0, b.Flash - 0.012f);
         foreach (var a in nodes.Values)
         {
             a.Flash = Math.Max(0, a.Flash - 0.02f);
@@ -490,6 +508,8 @@ class BrainMap : Control
                 br.Color = Color.FromArgb((int)(60 + 170 * nr), 200, 232, 255); g.FillRectangle(br, shellP[i].X - r * 0.6f, shellP[i].Y - r * 0.6f, r * 1.2f, r * 1.2f);
             }
 
+        DrawBulbs(g);
+
         // Nơ-ron thật: chiếu ra màn hình rồi vẽ từ xa tới gần
         foreach (var n in nodes.Values)
             n.P = Project(n.X, n.Y + 0.006f * (float)Math.Sin(time * 0.9f + n.Phase), n.Z, 0, out n.F, out n.D);
@@ -561,6 +581,41 @@ class BrainMap : Control
         using (var br = new SolidBrush(Color.FromArgb(160, 190, 205, 240))) { var sz = g.MeasureString(hint, Font); g.DrawString(hint, Font, br, (W - sz.Width) / 2, H - 44); }
         // Máy chậm thì giảm nhịp khung hình cho đều, thay vì để giật
         frame.Interval = Math.Max(33, Math.Min(80, (int)watch.ElapsedMilliseconds + 12));
+    }
+
+    // Bóng đèn bay quanh bộ não, nối vào não bằng dây dẫn; vừa dùng thì sáng vàng và có dòng điện chạy vào não
+    void DrawBulbs(Graphics g)
+    {
+        if (bulbs.Count == 0) return;
+        float f, d, fc, dc;
+        var core = Project(0, -0.12f, 0.02f, 0, out fc, out dc);
+        var warm = Color.FromArgb(255, 214, 120); var cool = Color.FromArgb(140, 170, 220);
+        for (int i = 0; i < bulbs.Count; i++)
+        {
+            var b = bulbs[i];
+            double ang = Math.PI * 2 * i / bulbs.Count + time * 0.06;
+            float x = (float)Math.Cos(ang) * 1.18f, z = (float)Math.Sin(ang) * 1.18f, y = -0.08f + 0.22f * (float)Math.Sin(ang * 2 + i);
+            var p = Project(x, y, z, 0, out f, out d);
+            bool live = (DateTime.Now - b.LastSeen).TotalMinutes < 2 || b.Flash > 0.05f;
+            float glow = live ? 0.6f + 0.4f * Math.Max(b.Flash, 0.5f + 0.5f * (float)Math.Sin(time * 3 + i)) : 0.25f;
+            var c = live ? warm : cool;
+            // Dây dẫn vào bộ não
+            using (var pen = new Pen(A(c, live ? 110 : 35), live ? 1.4f : 0.8f) { DashStyle = live ? DashStyle.Solid : DashStyle.Dot }) g.DrawLine(pen, p, core);
+            if (live)   // dòng điện chạy vào não
+                for (int k = 0; k < 3; k++)
+                {
+                    float t = (float)((time * 0.6 + k / 3.0 + i * 0.17) % 1.0);
+                    var q = new PointF(p.X + (core.X - p.X) * t, p.Y + (core.Y - p.Y) * t);
+                    using (var br = new SolidBrush(A(warm, 230 * (1 - t * 0.6)))) g.FillEllipse(br, q.X - 2.4f, q.Y - 2.4f, 4.8f, 4.8f);
+                }
+            float r = (5 + Math.Min(5, (float)Math.Log(1 + b.Uses) * 1.5f)) * f * Math.Max(0.8f, scale / 400f);
+            DrawGlow(g, c, glow, p, r * (3.2f + b.Flash * 3));
+            using (var br = new SolidBrush(A(c, 120 + 135 * glow))) g.FillEllipse(br, p.X - r, p.Y - r, 2 * r, 2 * r);
+            using (var br = new SolidBrush(A(Color.White, 200 * glow))) g.FillEllipse(br, p.X - r * 0.45f, p.Y - r * 0.6f, r * 0.9f, r * 0.9f);
+            var name = Short(b.Name, 22);
+            var sz = g.MeasureString(name, Font);
+            using (var br = new SolidBrush(A(live ? warm : Color.FromArgb(170, 185, 215), live ? 255 : 170))) g.DrawString(name, Font, br, p.X - sz.Width / 2, p.Y + r + 4);
+        }
     }
 
     static string Short(string s, int n) { s = s ?? ""; return s.Length > n ? s.Substring(0, n - 1) + "…" : s; }

@@ -120,6 +120,17 @@ static class Memory
         });
     }
 
+    // Người dùng xoá hẳn một ghi nhớ (agent không có quyền này; agent chỉ đánh dấu đã cũ)
+    public static void Delete(string id)
+    {
+        With(true, s =>
+        {
+            s.Neurons.RemoveAll(n => n.Id == id);
+            s.Synapses.RemoveAll(y => y.A == id || y.B == id);
+            return 0;
+        });
+    }
+
     public static double VitalityOf(Neuron n) { return Vitality(n); }
     public static string Label(string kind) { return KindLabel(kind); }
 

@@ -151,13 +151,25 @@ static class Backup
     }
 
     public static bool HasGh { get { return GhAvailable(); } }
-    public static bool GhLoggedIn() { try { return Gh("auth status", 20000).Item1 == 0; } catch { return false; } }
+    // Đã đăng nhập chưa: xem cả nội dung trả về (gh có thể báo lỗi ở một tài khoản phụ dù tài khoản chính vẫn đăng nhập)
+    public static bool GhLoggedIn()
+    {
+        try
+        {
+            var r = Gh("auth status --hostname github.com", 45000);
+            return r.Item1 == 0 || r.Item2.IndexOf("Logged in to github.com", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+        catch { return false; }
+    }
 
-    // Mở cửa sổ đăng nhập GitHub (người dùng tự đăng nhập trên trình duyệt), rồi cho Git dùng chung đăng nhập đó
+    // Mở cửa sổ đăng nhập GitHub (người dùng tự đăng nhập trên trình duyệt), rồi cho Git dùng chung đăng nhập đó.
+    // Chờ tối đa 10 phút; quá thì bỏ để hộp thoại không treo mãi.
     public static void GhLogin()
     {
-        var p = Process.Start(new ProcessStartInfo("cmd.exe", "/c gh auth login --web --git-protocol https --hostname github.com & gh auth setup-git") { UseShellExecute = true });
-        p.WaitForExit();
+        var p = Process.Start(new ProcessStartInfo("cmd.exe", "/c title Dang nhap GitHub cho Bentar Second Brain & echo Bam Enter de mo trinh duyet va dang nhap GitHub. & gh auth login --web --git-protocol https --hostname github.com & gh auth setup-git")
+            { UseShellExecute = true, WindowStyle = ProcessWindowStyle.Normal });
+        if (!p.WaitForExit(10 * 60 * 1000)) { try { p.Kill(); } catch { } throw new TimeoutException("Chưa đăng nhập GitHub xong (quá 10 phút)."); }
+        if (!GhLoggedIn()) throw new InvalidOperationException("Chưa đăng nhập được GitHub.");
     }
 
     public class RepoInfo { public string Name, Url; public bool IsBackup; public override string ToString() { return (IsBackup ? "★ " : "") + Name; } }
@@ -181,7 +193,7 @@ static class Backup
     public static string CreateGithubRepo(string name)
     {
         if (!GhAvailable()) throw new InvalidOperationException("Máy chưa có GitHub CLI (gh). Hãy tự tạo một repo riêng tư trên github.com rồi dán địa chỉ vào.");
-        if (!GhLoggedIn()) GhLogin();
+        if (!GhLoggedIn()) throw new InvalidOperationException("Chưa đăng nhập GitHub.");
         Gh("auth setup-git", 20000);   // để Git đẩy bản sao lưu bằng chính đăng nhập GitHub này
         var psi = new ProcessStartInfo("cmd.exe", "/c gh repo create " + name + " --private --description \"Sao luu ma hoa cua Bentar Second Brain\" && gh repo view " + name + " --json url -q .url")
         { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };

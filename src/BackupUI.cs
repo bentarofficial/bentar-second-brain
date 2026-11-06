@@ -64,6 +64,18 @@ static class BackupUI
             bool useNew = rbNew.Checked; string name = txtName.Text.Trim(), url = txtUrl.Text.Trim(), pass = txtPass.Text;
             try
             {
+                if (useNew)
+                {
+                    lblMsg.Text = "Đang kiểm tra đăng nhập GitHub…";
+                    bool logged = await Task.Run(() => Backup.HasGh && Backup.GhLoggedIn());
+                    if (Backup.HasGh && !logged)
+                    {
+                        MessageBox.Show(f, "Cần đăng nhập GitHub. Một cửa sổ đen sẽ mở ra: bấm Enter trong cửa sổ đó, đăng nhập trên trình duyệt, rồi quay lại đây.", Cleaner.AppName);
+                        lblMsg.Text = "Đang chờ bạn đăng nhập GitHub trong cửa sổ đen…";
+                        await Task.Run(() => Backup.GhLogin());
+                    }
+                    lblMsg.Text = "Đang tạo repo riêng tư và sao lưu lần đầu…";
+                }
                 code = await Task.Run(() => Backup.Setup(useNew ? Backup.CreateGithubRepo(name) : url, pass));
                 f.DialogResult = DialogResult.OK;
             }
