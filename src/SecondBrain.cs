@@ -64,7 +64,7 @@ static class Brain
     static List<string> terms = new List<string>();
     static Dictionary<string, int> termIds = new Dictionary<string, int>();
     static Dictionary<int, List<int>> postings = new Dictionary<int, List<int>>();
-    static bool loaded;
+    static volatile bool loaded;
     public static DateTime BuiltAt = DateTime.MinValue;
     public static volatile bool Building;
     public static volatile string Progress = "";
@@ -152,13 +152,17 @@ static class Brain
     }
 
     // ---------- Lưu / nạp chỉ mục ----------
+    // Nạp chỉ mục dưới khoá riêng: giao diện đọc số liệu (khoá gate) không bị chặn trong lúc nạp file lớn
+    static readonly object loadGate = new object();
     public static void EnsureLoaded()
     {
-        lock (gate)
+        if (loaded) return;
+        lock (loadGate)
         {
             if (loaded) return;
+            try { if (File.Exists(IndexFile)) LoadFrom(IndexFile); }
+            catch { Install(new List<BrainFile>(), new List<BrainProject>(), new List<string>()); }
             loaded = true;
-            try { if (File.Exists(IndexFile)) LoadFrom(IndexFile); } catch { files.Clear(); projects.Clear(); terms.Clear(); termIds.Clear(); postings.Clear(); }
         }
     }
 

@@ -12,7 +12,7 @@ App dọn dẹp máy tính Windows. App quét các ổ đĩa và chia kết qu�
 App không cần cài thêm gì, chỉ dùng trình biên dịch C# có sẵn trong Windows (.NET Framework 4.x):
 
 ```powershell
-& C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /nologo /target:winexe /codepage:65001 /optimize /win32icon:src\app.ico "/out:Bentar Second Brain.exe" /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Core.dll /r:Microsoft.VisualBasic.dll /r:System.Web.Extensions.dll /r:System.IO.Compression.dll src\BentarSecondBrain.cs src\SecondBrain.cs src\Installer.cs src\Memory.cs
+& C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /nologo /target:winexe /codepage:65001 /optimize /win32icon:src\app.ico "/out:Bentar Second Brain.exe" /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Core.dll /r:Microsoft.VisualBasic.dll /r:System.Web.Extensions.dll /r:System.IO.Compression.dll src\BentarSecondBrain.cs src\SecondBrain.cs src\Installer.cs src\Memory.cs src\BrainMap.cs
 ```
 
 ## Cài đặt và gỡ cài đặt
@@ -57,6 +57,15 @@ Second Brain là trí nhớ dài hạn dùng chung cho mọi agent, lưu ở `%L
 - **Phai dần, không xoá**: ghi nhớ và liên kết lâu không dùng mờ dần (chu kỳ bán rã 90–120 ngày); ghi nhớ đánh dấu đã cũ được giữ lại nhưng xếp sau.
 - **Nhớ lại có liên tưởng**: `recall` trả về ghi nhớ khớp và lan sang các ý nối với chúng; `search` và `project_overview` cũng kèm ghi nhớ liên quan.
 - Ghi nhớ gần trùng được củng cố thay vì nhân bản; bản cũ giữ trong lịch sử.
+
+### Bản đồ bộ não
+
+Tab **Bộ não** (mở đầu tiên) vẽ đúng các nơ-ron và khớp thần kinh trong trí nhớ:
+
+- Bộ não 3D là đám mây hạt sáng nối thành lưới, xoay và lắc nhẹ trong không gian, có phối cảnh gần xa; mạng lưới sao phía sau xoay chậm hơn. Kéo chuột để xoay, lăn chuột để phóng to. Ghi nhớ của agent nằm ở thuỳ trán, màu theo loại (quyết định, bài học, sự thật...); dự án ở thuỳ đỉnh, file ở thuỳ thái dương.
+- Nơ-ron to và sáng theo mức được dùng, mờ dần khi lâu không dùng; đường nối dày theo độ mạnh khớp thần kinh, nét chấm là các dự án chung thư mục.
+- Xung điện chạy dọc đường nối; khi agent thật sự nhớ lại, đọc hay ghi, nơ-ron đó loé sáng và xung lan sang các ý liên quan.
+- Gõ từ khoá rồi Enter để làm sáng các ý khớp và mở thẻ thông tin của ý khớp nhất; nhấp một nơ-ron để xem, nhấp đúp để mở vị trí trong Explorer.
 
 Second Brain **không bao giờ sửa hay xoá file**. `copy` chỉ tạo bản sao mới và từ chối ghi đè. Bỏ qua khi lập chỉ mục: thư mục hệ thống, AppData, `node_modules`, `.git`, môi trường ảo, và nội dung file bí mật (`.env`, khoá, credentials).
 

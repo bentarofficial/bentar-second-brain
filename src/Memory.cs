@@ -99,6 +99,17 @@ static class Memory
         finally { if (owned) mutex.ReleaseMutex(); }
     }
 
+    // Ảnh chụp toàn bộ trí nhớ cho bản đồ bộ não (bản sao, không giữ khoá)
+    public static Tuple<List<Neuron>, List<Synapse>> Snapshot()
+    {
+        return With(false, s => Tuple.Create(
+            s.Neurons.Select(n => new Neuron { Id = n.Id, Kind = n.Kind, Title = n.Title, Text = n.Text, Source = n.Source, Tags = n.Tags, Agent = n.Agent,
+                Created = n.Created, Updated = n.Updated, LastUsed = n.LastUsed, Uses = n.Uses, Outdated = n.Outdated }).ToList(),
+            s.Synapses.Select(y => new Synapse { A = y.A, B = y.B, Weight = EffectiveWeight(y), LastFired = y.LastFired, Why = y.Why }).ToList()));
+    }
+    public static double VitalityOf(Neuron n) { return Vitality(n); }
+    public static string Label(string kind) { return KindLabel(kind); }
+
     public static Tuple<int, int> Counts() { return With(false, s => Tuple.Create(s.Neurons.Count(n => n.Kind != "file" && n.Kind != "du-an"), s.Synapses.Count)); }
 
     static Neuron Find(MemoryStore s, string id) { return s.Neurons.FirstOrDefault(n => n.Id == id); }

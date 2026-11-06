@@ -13,7 +13,7 @@ using System.Windows.Forms;
 
 [assembly: System.Reflection.AssemblyTitle("Bentar Second Brain")]
 [assembly: System.Reflection.AssemblyProduct("Bentar Second Brain")]
-[assembly: System.Reflection.AssemblyVersion("2.6.0.0")]
+[assembly: System.Reflection.AssemblyVersion("2.7.0.0")]
 
 // Cập nhật từ GitHub Releases: so sánh tag (vd "v2.1.0") với phiên bản app, tải file .exe mới rồi tự thay thế
 static class Updater
@@ -726,7 +726,7 @@ class MainForm : Form
         t3.Controls.Add(keep);
         var t4 = new TabPage("4. Thư mục lâu không dùng");
         t4.Controls.AddRange(new Control[] { stale, btnStaleOpen, btnStaleRecycle, staleNote });
-        tabs.TabPages.AddRange(new[] { t1, t2, t4, t3, BuildBrainTab() });
+        tabs.TabPages.AddRange(new[] { BuildMapTab(), t1, t2, t4, t3, BuildBrainTab() });
 
         lblStatus.SetBounds(196, 76, 548, 46);
         lblStatus.Text = "Bấm \"Quét toàn bộ\" để app phân loại file trên ổ C thành 3 nhóm.\nApp chỉ TỰ XOÁ nhóm 1; nhóm 2 bạn tự quyết; nhóm 3 không bao giờ bị đụng tới.";
@@ -809,7 +809,9 @@ class MainForm : Form
             foreach (Control c in page.Controls)
             {
                 var lv = c as ListView;
-                if (lv != null)
+                if (c is BrainMap) c.Anchor = T | B | L | R;
+                else if (c is TextBox && page.Controls.OfType<BrainMap>().Any()) c.Anchor = T | L;   // ô tìm trên bản đồ giữ cỡ cố định
+                else if (lv != null)
                 {
                     lv.Anchor = T | B | L | R;
                     lv.Resize += (s, e) => FillLastColumn(lv);
@@ -826,6 +828,31 @@ class MainForm : Form
         int used = 0;
         for (int i = 0; i < lv.Columns.Count - 1; i++) used += lv.Columns[i].Width;
         lv.Columns[lv.Columns.Count - 1].Width = Math.Max(120, lv.ClientSize.Width - used - 4);
+    }
+
+    // --- Tab đầu: bản đồ bộ não (nơ-ron, khớp thần kinh, hoạt động thật của agent) ---
+    TabPage BuildMapTab()
+    {
+        var t = new TabPage("Bộ não") { BackColor = Color.FromArgb(8, 12, 28) };
+        var map = new BrainMap();
+        map.SetBounds(0, 34, 720, 296);
+        var txt = new TextBox();
+        txt.SetBounds(6, 5, 300, 24);
+        var lbl = new Label { ForeColor = Color.FromArgb(170, 190, 230), BackColor = Color.Transparent, Font = new Font("Segoe UI", 8.5f) };
+        lbl.SetBounds(314, 8, 400, 20);
+        lbl.Text = "Gõ để tìm trên bản đồ · nhấp một nơ-ron để xem · nhấp đúp để mở";
+        map.StatusChanged += s => lbl.Text = s;
+        txt.KeyDown += (s, e) =>
+        {
+            if (e.KeyCode != Keys.Enter) return;
+            e.SuppressKeyPress = true;
+            int n = map.Highlight(txt.Text);
+            lbl.Text = txt.Text.Trim().Length == 0 ? "" : "\"" + txt.Text.Trim() + "\": " + n + " nơ-ron sáng lên";
+        };
+        t.Controls.AddRange(new Control[] { txt, lbl, map });
+        t.VisibleChanged += (s, e) => { if (t.Visible) map.Reload(); };
+        map.Reload();
+        return t;
     }
 
     // --- Tab 5: Second Brain – chỉ mục toàn máy cho agent tra cứu ---
