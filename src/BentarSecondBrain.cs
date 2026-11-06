@@ -13,7 +13,7 @@ using System.Windows.Forms;
 
 [assembly: System.Reflection.AssemblyTitle("Bentar Second Brain")]
 [assembly: System.Reflection.AssemblyProduct("Bentar Second Brain")]
-[assembly: System.Reflection.AssemblyVersion("2.3.0.0")]
+[assembly: System.Reflection.AssemblyVersion("2.4.0.0")]
 
 // Cập nhật từ GitHub Releases: so sánh tag (vd "v2.1.0") với phiên bản app, tải file .exe mới rồi tự thay thế
 static class Updater
@@ -724,7 +724,7 @@ class MainForm : Form
         t3.Controls.Add(keep);
         var t4 = new TabPage("4. Thư mục lâu không dùng");
         t4.Controls.AddRange(new Control[] { stale, btnStaleOpen, btnStaleRecycle, staleNote });
-        tabs.TabPages.AddRange(new[] { t1, t2, t4, t3 });
+        tabs.TabPages.AddRange(new[] { t1, t2, t4, t3, BuildBrainTab() });
 
         lblStatus.SetBounds(196, 76, 548, 46);
         lblStatus.Text = "Bấm \"Quét toàn bộ\" để app phân loại file trên ổ C thành 3 nhóm.\nApp chỉ TỰ XOÁ nhóm 1; nhóm 2 bạn tự quyết; nhóm 3 không bao giờ bị đụng tới.";
@@ -777,6 +777,95 @@ class MainForm : Form
         Controls.AddRange(new Control[] { title, lblVer, btnUpdate, lblDisk, btnScan, lblStatus, tabs, grp });
         Shown += async (s, e) => await CheckUpdate(false);
         UpdateInfo();
+    }
+
+    // --- Tab 5: Second Brain – chỉ mục toàn máy cho agent tra cứu ---
+    readonly Label lblBrain = new Label();
+    readonly TextBox txtBrain = new TextBox();
+    readonly ListView brainHits = new ListView();
+
+    TabPage BuildBrainTab()
+    {
+        var t = new TabPage("5. Second Brain");
+        lblBrain.SetBounds(8, 6, 700, 40);
+        lblBrain.Font = new Font("Segoe UI", 8.5f);
+        txtBrain.SetBounds(8, 50, 560, 26);
+        var btnFind = new Button { Text = "Tìm" };
+        btnFind.SetBounds(576, 48, 132, 30);
+        brainHits.View = View.Details;
+        brainHits.FullRowSelect = true;
+        brainHits.ShowItemToolTips = true;
+        brainHits.SetBounds(8, 84, 700, 194);
+        brainHits.Columns.Add("File", 260);
+        brainHits.Columns.Add("Sửa", 80);
+        brainHits.Columns.Add("Đoạn khớp", 340);
+        brainHits.DoubleClick += (s, e) => { if (brainHits.SelectedItems.Count > 0) Process.Start("explorer.exe", "/select,\"" + brainHits.SelectedItems[0].Tag + "\""); };
+        Func<Task> find = async () =>
+        {
+            var q = txtBrain.Text;
+            var hits = await Task.Run(() => Brain.Search(q, null, null, false, 50));
+            brainHits.Items.Clear();
+            foreach (var h in hits)
+            {
+                var snip = (h.Snippet ?? "").Replace("\r", "").Replace("\n", "  ·  ");
+                brainHits.Items.Add(new ListViewItem(new[] { h.File.Path, DateTime.FromBinary(h.File.Mtime).ToString("dd/MM/yyyy"), snip })
+                    { Tag = h.File.Path, ToolTipText = h.File.Path + "\n" + h.Snippet });
+            }
+            if (hits.Count == 0) brainHits.Items.Add(new ListViewItem(new[] { "Không tìm thấy.", "", "" }));
+        };
+        btnFind.Click += async (s, e) => await find();
+        txtBrain.KeyDown += async (s, e) => { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; await find(); } };
+
+        var btnIndex = new Button { Text = "Cập nhật chỉ mục" };
+        btnIndex.SetBounds(8, 286, 160, 36);
+        btnIndex.Click += (s, e) => { if (!Brain.Building) Task.Run(() => { try { Brain.Build(); } catch (Exception ex) { Brain.Progress = "Lỗi: " + ex.Message; } }); };
+        var btnConnect = new Button { Text = "Kết nối Claude Code", BackColor = Color.FromArgb(58, 42, 160), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
+        btnConnect.SetBounds(176, 286, 180, 36);
+        btnConnect.Click += async (s, e) => await ConnectClaude();
+        var note = new Label { Text = "Agent ở mọi dự án tra cứu được tài liệu trên mọi ổ, USB, thẻ nhớ.\nChỉ đọc và sao chép – không bao giờ sửa hay xoá file.",
+            Location = new Point(364, 284), Size = new Size(344, 40), ForeColor = Color.DimGray, Font = new Font("Segoe UI", 8) };
+        t.Controls.AddRange(new Control[] { lblBrain, txtBrain, btnFind, brainHits, btnIndex, btnConnect, note });
+
+        var timer = new Timer { Interval = 1000 };
+        timer.Tick += (s, e) => ShowBrainStatus();
+        timer.Start();
+        Task.Run(() => { Brain.EnsureLoaded(); Brain.RefreshIfStale(TimeSpan.FromHours(6)); });
+        return t;
+    }
+
+    void ShowBrainStatus()
+    {
+        var p = Brain.Progress;
+        if (p.Length > 110) p = "…" + p.Substring(p.Length - 110);
+        lblBrain.Text = "Chỉ mục: " + Brain.FileCount.ToString("N0") + " file, " + Brain.ProjectCount + " dự án · cập nhật " +
+            (Brain.BuiltAt == DateTime.MinValue ? "chưa có" : Brain.BuiltAt.ToString("dd/MM/yyyy HH:mm")) +
+            (Brain.Building ? "\n" + p : "\nGõ từ khoá để tìm trên toàn máy (không cần gõ dấu).");
+    }
+
+    // Đăng ký Second Brain làm máy chủ MCP cho Claude Code ở phạm vi người dùng (mọi dự án đều thấy)
+    async Task ConnectClaude()
+    {
+        string exe = Path.Combine(Cleaner.DataDir, "BentarSecondBrain.exe");
+        string cmd = "claude mcp add --scope user second-brain -- \"" + exe + "\" /mcp";
+        try
+        {
+            Directory.CreateDirectory(Cleaner.DataDir);
+            if (!string.Equals(Application.ExecutablePath, exe, StringComparison.OrdinalIgnoreCase)) File.Copy(Application.ExecutablePath, exe, true);
+        }
+        catch (Exception ex) { MessageBox.Show("Không chép được app vào " + exe + ":\n" + ex.Message, Text); return; }
+        Func<string, Tuple<int, string>> run = c =>
+        {
+            var psi = new ProcessStartInfo("cmd.exe", "/c " + c) { CreateNoWindow = true, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+            using (var pr = Process.Start(psi)) { var o = pr.StandardOutput.ReadToEnd() + pr.StandardError.ReadToEnd(); pr.WaitForExit(); return Tuple.Create(pr.ExitCode, o); }
+        };
+        var r = await Task.Run(() => { run("claude mcp remove --scope user second-brain"); return run(cmd); });
+        if (r.Item1 == 0)
+            MessageBox.Show("Đã kết nối Second Brain với Claude Code.\nMở lại phiên Claude Code ở bất kỳ dự án nào là agent dùng được.", Text);
+        else
+        {
+            Clipboard.SetText(cmd);
+            MessageBox.Show("Chưa chạy được lệnh claude (" + r.Item2.Trim() + ").\n\nLệnh đã được chép vào clipboard, bạn dán vào terminal để chạy:\n" + cmd, Text);
+        }
     }
 
     void UpdateInfo()
@@ -1082,6 +1171,9 @@ class MainForm : Form
         if (args.Any(a => a.Equals("/auto", StringComparison.OrdinalIgnoreCase))) { RunAuto(); return; }
         // /report <file>: chỉ quét (không xoá gì) và ghi kết quả phân loại ra file
         if (args.Length == 2 && args[0].Equals("/report", StringComparison.OrdinalIgnoreCase)) { WriteReport(args[1]); return; }
+        // /mcp: máy chủ MCP cho coding agent; /index: cập nhật chỉ mục Second Brain rồi thoát
+        if (args.Any(a => a.Equals("/mcp", StringComparison.OrdinalIgnoreCase))) { McpServer.Run(); return; }
+        if (args.Any(a => a.Equals("/index", StringComparison.OrdinalIgnoreCase))) { Brain.Build(); return; }
         Application.Run(new MainForm());
     }
 }

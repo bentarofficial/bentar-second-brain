@@ -12,7 +12,7 @@ App dọn dẹp máy tính Windows. App quét các ổ đĩa và chia kết qu�
 App không cần cài thêm gì, chỉ dùng trình biên dịch C# có sẵn trong Windows (.NET Framework 4.x):
 
 ```powershell
-& C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /nologo /target:winexe /codepage:65001 /optimize /win32icon:src\app.ico "/out:Bentar Second Brain.exe" /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Core.dll /r:Microsoft.VisualBasic.dll src\BentarSecondBrain.cs
+& C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /nologo /target:winexe /codepage:65001 /optimize /win32icon:src\app.ico "/out:Bentar Second Brain.exe" /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Core.dll /r:Microsoft.VisualBasic.dll /r:System.Web.Extensions.dll /r:System.IO.Compression.dll src\BentarSecondBrain.cs src\SecondBrain.cs
 ```
 
 ## Cập nhật
@@ -29,7 +29,25 @@ Cách phát hành một phiên bản mới:
 gh release create v2.3.0 "Bentar Second Brain.exe" --title "v2.3.0" --notes "Có gì mới..."
 ```
 
+## Second Brain cho agent
+
+App lập chỉ mục mọi ổ trên máy (ổ cứng, USB, thẻ nhớ): tên file và nội dung file chữ, mã nguồn, Word (.docx). Tìm không phân biệt dấu tiếng Việt. Khi USB/thẻ nhớ được rút ra, chỉ mục vẫn giữ những gì nó từng có.
+
+Agent ở bất kỳ dự án nào cũng tra cứu được qua máy chủ MCP (`BentarSecondBrain.exe /mcp`). Bấm **Kết nối Claude Code** ở tab "5. Second Brain", hoặc chạy:
+
+```powershell
+claude mcp add --scope user second-brain -- "$env:LOCALAPPDATA\BentarSecondBrain\BentarSecondBrain.exe" /mcp
+```
+
+Các công cụ agent dùng được: `search`, `list_projects`, `project_overview`, `read_file`, `list_dir`, `copy`, `index_status`.
+
+Second Brain **không bao giờ sửa hay xoá file**. `copy` chỉ tạo bản sao mới và từ chối ghi đè. Bỏ qua khi lập chỉ mục: thư mục hệ thống, AppData, `node_modules`, `.git`, môi trường ảo, và nội dung file bí mật (`.env`, khoá, credentials).
+
+Chỉ mục tự cập nhật ngầm khi agent tra cứu (nếu đã cũ hơn 30 phút), hoặc bấm **Cập nhật chỉ mục**, hoặc chạy `BentarSecondBrain.exe /index`.
+
 ## Tham số dòng lệnh
 
 - `/auto`: dọn ngầm theo cài đặt đã lưu (Task Scheduler gọi chế độ này).
 - `/report <file>`: chỉ quét, không xoá gì, rồi ghi kết quả phân loại ra file.
+- `/mcp`: chạy máy chủ MCP qua stdio cho coding agent.
+- `/index`: cập nhật chỉ mục Second Brain rồi thoát.
