@@ -478,6 +478,136 @@ static class Brain
     }
 }
 
+// Cắm Second Brain vào các agent có trên máy (Claude Code, Claude Desktop, Cursor, Windsurf, Codex, Gemini CLI)
+static class AgentLinks
+{
+    public const string ServerName = "second-brain";
+    public static readonly string InstalledExe = Path.Combine(Cleaner.DataDir, "BentarSecondBrain.exe");
+    static readonly string Home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+    static readonly string Roaming = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+    static readonly string Local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+
+    // Chép app vào AppData. File cũ có thể đang chạy (agent đang dùng /mcp): Windows không cho ghi đè
+    // nhưng cho đổi tên, nên đổi tên bản cũ sang .old rồi mới chép bản mới vào; bản cũ được dọn ở lần sau.
+    public static void InstallExe(string source)
+    {
+        Directory.CreateDirectory(Cleaner.DataDir);
+        CleanupOld();
+        if (string.Equals(Path.GetFullPath(source), InstalledExe, StringComparison.OrdinalIgnoreCase)) return;
+        if (File.Exists(InstalledExe) && SameFile(source, InstalledExe)) return;
+        try { File.Copy(source, InstalledExe, true); }
+        catch (IOException)
+        {
+            File.Move(InstalledExe, Path.Combine(Cleaner.DataDir, "BentarSecondBrain." + DateTime.Now.Ticks + ".old"));
+            File.Copy(source, InstalledExe, false);
+        }
+    }
+
+    public static void CleanupOld()
+    {
+        try { foreach (var f in Directory.GetFiles(Cleaner.DataDir, "BentarSecondBrain.*.old")) try { File.Delete(f); } catch { } } catch { }
+    }
+
+    static bool SameFile(string a, string b)
+    {
+        var fa = new FileInfo(a); var fb = new FileInfo(b);
+        if (fa.Length != fb.Length) return false;
+        using (var sha = System.Security.Cryptography.SHA256.Create())
+        using (var sa = File.OpenRead(a)) using (var sb = File.Open(b, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+            return sha.ComputeHash(sa).SequenceEqual(sha.ComputeHash(sb));
+    }
+
+    // Trả về từng dòng kết quả để hiện cho người dùng
+    public static List<string> ConnectAll()
+    {
+        var r = new List<string>();
+        r.Add(Try("Claude Code", ConnectClaudeCode));
+        string desktop = Path.Combine(Roaming, "Claude");
+        var store = Directory.Exists(Path.Combine(Local, "Packages")) ? Directory.GetDirectories(Path.Combine(Local, "Packages"), "Claude_*") : new string[0];
+        foreach (var pkg in store)
+        {
+            var d = Path.Combine(pkg, "LocalCache", "Roaming", "Claude");
+            if (Directory.Exists(d)) r.Add(Try("Claude Desktop (bản Store)", () => JsonConfig(Path.Combine(d, "claude_desktop_config.json"))));
+        }
+        if (Directory.Exists(desktop)) r.Add(Try("Claude Desktop", () => JsonConfig(Path.Combine(desktop, "claude_desktop_config.json"))));
+        r.Add(Try("Cursor", () => JsonConfig(Path.Combine(Home, ".cursor", "mcp.json"))));
+        r.Add(Try("Windsurf", () => JsonConfig(Path.Combine(Home, ".codeium", "windsurf", "mcp_config.json"))));
+        r.Add(Try("Gemini CLI", () => JsonConfig(Path.Combine(Home, ".gemini", "settings.json"))));
+        r.Add(Try("Codex", CodexConfig));
+        return r.Where(x => x != null).ToList();
+    }
+
+    static string Try(string agent, Func<string> f)
+    {
+        try { var s = f(); return s == null ? null : agent + ": " + s; }
+        catch (Exception ex) { return agent + ": lỗi – " + ex.Message; }
+    }
+
+    static Tuple<int, string> Cmd(string c)
+    {
+        var psi = new System.Diagnostics.ProcessStartInfo("cmd.exe", "/c " + c) { CreateNoWindow = true, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+        using (var p = System.Diagnostics.Process.Start(psi))
+        {
+            var err = p.StandardError.ReadToEndAsync();
+            var o = p.StandardOutput.ReadToEnd() + err.Result;
+            p.WaitForExit();
+            return Tuple.Create(p.ExitCode, o);
+        }
+    }
+
+    static string ConnectClaudeCode()
+    {
+        if (Cmd("where claude").Item1 != 0) return null;   // chưa cài Claude Code
+        if (Cmd("claude mcp get " + ServerName).Item1 == 0) return "đã kết nối";
+        var r = Cmd("claude mcp add --scope user " + ServerName + " -- \"" + InstalledExe + "\" /mcp");
+        if (r.Item1 != 0) throw new Exception(r.Item2.Trim());
+        return "đã kết nối (mọi dự án)";
+    }
+
+    // Thêm "second-brain" vào mục "mcpServers" bằng cách chèn chữ, giữ nguyên định dạng và các cài đặt khác của file.
+    static string JsonConfig(string file)
+    {
+        var dir = Path.GetDirectoryName(file);
+        if (!Directory.Exists(dir)) return null;
+        string entry = "\"" + ServerName + "\": { \"command\": \"" + InstalledExe.Replace("\\", "\\\\") + "\", \"args\": [\"/mcp\"] }";
+        string text = File.Exists(file) ? File.ReadAllText(file, Encoding.UTF8) : "";
+        if (text.Trim().Length == 0) { File.WriteAllText(file, "{\n  \"mcpServers\": {\n    " + entry + "\n  }\n}\n", new UTF8Encoding(false)); return "đã kết nối"; }
+        if (text.Contains("\"" + ServerName + "\"")) return "đã kết nối";
+        var m = Regex.Match(text, "\"mcpServers\"\\s*:\\s*\\{");
+        string updated;
+        if (m.Success)
+        {
+            int at = m.Index + m.Length;
+            bool empty = Regex.IsMatch(text.Substring(at), "^\\s*\\}");
+            updated = text.Insert(at, "\n    " + entry + (empty ? "\n  " : ","));
+        }
+        else
+        {
+            int at = text.IndexOf('{');
+            if (at < 0) throw new InvalidDataException("File cấu hình không hợp lệ: " + file);
+            bool empty = Regex.IsMatch(text.Substring(at + 1), "^\\s*\\}");
+            updated = text.Insert(at + 1, "\n  \"mcpServers\": {\n    " + entry + "\n  }" + (empty ? "\n" : ","));
+        }
+        new JavaScriptSerializer { MaxJsonLength = int.MaxValue }.DeserializeObject(updated);   // kiểm tra JSON còn hợp lệ trước khi ghi
+        File.Copy(file, file + ".bak-secondbrain", true);
+        File.WriteAllText(file, updated, new UTF8Encoding(false));
+        return "đã kết nối (khởi động lại app để nhận)";
+    }
+
+    static string CodexConfig()
+    {
+        var dir = Path.Combine(Home, ".codex");
+        if (!Directory.Exists(dir)) return null;
+        var file = Path.Combine(dir, "config.toml");
+        string text = File.Exists(file) ? File.ReadAllText(file, Encoding.UTF8) : "";
+        if (text.Contains("[mcp_servers." + ServerName + "]")) return "đã kết nối";
+        if (File.Exists(file)) File.Copy(file, file + ".bak-secondbrain", true);
+        var block = (text.Length > 0 && !text.EndsWith("\n") ? "\n" : "") + "\n[mcp_servers." + ServerName + "]\ncommand = '" + InstalledExe + "'\nargs = [\"/mcp\"]\n";
+        File.AppendAllText(file, block, new UTF8Encoding(false));
+        return "đã kết nối";
+    }
+}
+
 // Máy chủ MCP (Model Context Protocol) qua stdio: mỗi dòng là một thông điệp JSON-RPC 2.0
 static class McpServer
 {

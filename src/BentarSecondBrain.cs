@@ -13,7 +13,7 @@ using System.Windows.Forms;
 
 [assembly: System.Reflection.AssemblyTitle("Bentar Second Brain")]
 [assembly: System.Reflection.AssemblyProduct("Bentar Second Brain")]
-[assembly: System.Reflection.AssemblyVersion("2.4.0.0")]
+[assembly: System.Reflection.AssemblyVersion("2.4.1.0")]
 
 // Cập nhật từ GitHub Releases: so sánh tag (vd "v2.1.0") với phiên bản app, tải file .exe mới rồi tự thay thế
 static class Updater
@@ -57,8 +57,10 @@ static class Updater
         Func<string, string> q = s => "'" + s.Replace("'", "''") + "'";
         string script =
             "$p=" + Process.GetCurrentProcess().Id + "; while(Get-Process -Id $p -ErrorAction SilentlyContinue){Start-Sleep -Milliseconds 300};" +
-            "Copy-Item -LiteralPath " + q(newExe) + " -Destination " + q(target) + " -Force;" +
-            "if((Test-Path -LiteralPath " + q(installed) + ") -and (" + q(installed) + " -ne " + q(target) + ")){Copy-Item -LiteralPath " + q(newExe) + " -Destination " + q(installed) + " -Force};" +
+            // File có thể đang được agent chạy (/mcp): không ghi đè được thì đổi tên bản cũ sang .old rồi chép
+            "function Put($d){try{Copy-Item -LiteralPath " + q(newExe) + " -Destination $d -Force -ErrorAction Stop}catch{Move-Item -LiteralPath $d -Destination ($d+'.'+[DateTime]::Now.Ticks+'.old') -Force;Copy-Item -LiteralPath " + q(newExe) + " -Destination $d -Force}};" +
+            "Put " + q(target) + ";" +
+            "if((Test-Path -LiteralPath " + q(installed) + ") -and (" + q(installed) + " -ne " + q(target) + ")){Put " + q(installed) + "};" +
             "Remove-Item -LiteralPath " + q(newExe) + ";" +
             "Start-Process -FilePath " + q(target);
         string encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
@@ -819,9 +821,9 @@ class MainForm : Form
         var btnIndex = new Button { Text = "Cập nhật chỉ mục" };
         btnIndex.SetBounds(8, 286, 160, 36);
         btnIndex.Click += (s, e) => { if (!Brain.Building) Task.Run(() => { try { Brain.Build(); } catch (Exception ex) { Brain.Progress = "Lỗi: " + ex.Message; } }); };
-        var btnConnect = new Button { Text = "Kết nối Claude Code", BackColor = Color.FromArgb(58, 42, 160), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
+        var btnConnect = new Button { Text = "Kết nối các agent", BackColor = Color.FromArgb(58, 42, 160), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
         btnConnect.SetBounds(176, 286, 180, 36);
-        btnConnect.Click += async (s, e) => await ConnectClaude();
+        btnConnect.Click += async (s, e) => await ConnectAgents();
         var note = new Label { Text = "Agent ở mọi dự án tra cứu được tài liệu trên mọi ổ, USB, thẻ nhớ.\nChỉ đọc và sao chép – không bao giờ sửa hay xoá file.",
             Location = new Point(364, 284), Size = new Size(344, 40), ForeColor = Color.DimGray, Font = new Font("Segoe UI", 8) };
         t.Controls.AddRange(new Control[] { lblBrain, txtBrain, btnFind, brainHits, btnIndex, btnConnect, note });
@@ -842,30 +844,14 @@ class MainForm : Form
             (Brain.Building ? "\n" + p : "\nGõ từ khoá để tìm trên toàn máy (không cần gõ dấu).");
     }
 
-    // Đăng ký Second Brain làm máy chủ MCP cho Claude Code ở phạm vi người dùng (mọi dự án đều thấy)
-    async Task ConnectClaude()
+    // Cài app vào AppData rồi đăng ký Second Brain làm máy chủ MCP cho mọi agent có trên máy
+    async Task ConnectAgents()
     {
-        string exe = Path.Combine(Cleaner.DataDir, "BentarSecondBrain.exe");
-        string cmd = "claude mcp add --scope user second-brain -- \"" + exe + "\" /mcp";
-        try
-        {
-            Directory.CreateDirectory(Cleaner.DataDir);
-            if (!string.Equals(Application.ExecutablePath, exe, StringComparison.OrdinalIgnoreCase)) File.Copy(Application.ExecutablePath, exe, true);
-        }
-        catch (Exception ex) { MessageBox.Show("Không chép được app vào " + exe + ":\n" + ex.Message, Text); return; }
-        Func<string, Tuple<int, string>> run = c =>
-        {
-            var psi = new ProcessStartInfo("cmd.exe", "/c " + c) { CreateNoWindow = true, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
-            using (var pr = Process.Start(psi)) { var o = pr.StandardOutput.ReadToEnd() + pr.StandardError.ReadToEnd(); pr.WaitForExit(); return Tuple.Create(pr.ExitCode, o); }
-        };
-        var r = await Task.Run(() => { run("claude mcp remove --scope user second-brain"); return run(cmd); });
-        if (r.Item1 == 0)
-            MessageBox.Show("Đã kết nối Second Brain với Claude Code.\nMở lại phiên Claude Code ở bất kỳ dự án nào là agent dùng được.", Text);
-        else
-        {
-            Clipboard.SetText(cmd);
-            MessageBox.Show("Chưa chạy được lệnh claude (" + r.Item2.Trim() + ").\n\nLệnh đã được chép vào clipboard, bạn dán vào terminal để chạy:\n" + cmd, Text);
-        }
+        try { AgentLinks.InstallExe(Application.ExecutablePath); }
+        catch (Exception ex) { MessageBox.Show("Không cài được app vào " + AgentLinks.InstalledExe + ":\n" + ex.Message, Text); return; }
+        var lines = await Task.Run(() => AgentLinks.ConnectAll());
+        MessageBox.Show(lines.Count == 0 ? "Không tìm thấy agent nào trên máy (Claude Code, Claude Desktop, Cursor, Windsurf, Codex, Gemini CLI)." :
+            "Kết nối Second Brain:\n\n" + string.Join("\n", lines) + "\n\nMở phiên agent MỚI là dùng được.", Text);
     }
 
     void UpdateInfo()
@@ -1174,6 +1160,17 @@ class MainForm : Form
         // /mcp: máy chủ MCP cho coding agent; /index: cập nhật chỉ mục Second Brain rồi thoát
         if (args.Any(a => a.Equals("/mcp", StringComparison.OrdinalIgnoreCase))) { McpServer.Run(); return; }
         if (args.Any(a => a.Equals("/index", StringComparison.OrdinalIgnoreCase))) { Brain.Build(); return; }
+        // /connect: cài app vào AppData và kết nối Second Brain với mọi agent trên máy, in kết quả ra stdout
+        if (args.Any(a => a.Equals("/connect", StringComparison.OrdinalIgnoreCase)))
+        {
+            using (var o = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false)) { AutoFlush = true })
+            {
+                try { AgentLinks.InstallExe(Application.ExecutablePath); o.WriteLine("Đã cài: " + AgentLinks.InstalledExe); }
+                catch (Exception ex) { o.WriteLine("Lỗi cài app: " + ex.Message); Environment.Exit(1); }
+                foreach (var l in AgentLinks.ConnectAll()) o.WriteLine(l);
+            }
+            return;
+        }
         Application.Run(new MainForm());
     }
 }

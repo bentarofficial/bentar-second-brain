@@ -33,7 +33,7 @@ gh release create v2.3.0 "Bentar Second Brain.exe" --title "v2.3.0" --notes "Có
 
 App lập chỉ mục mọi ổ trên máy (ổ cứng, USB, thẻ nhớ): tên file và nội dung file chữ, mã nguồn, Word (.docx). Tìm không phân biệt dấu tiếng Việt. Khi USB/thẻ nhớ được rút ra, chỉ mục vẫn giữ những gì nó từng có.
 
-Agent ở bất kỳ dự án nào cũng tra cứu được qua máy chủ MCP (`BentarSecondBrain.exe /mcp`). Bấm **Kết nối Claude Code** ở tab "5. Second Brain", hoặc chạy:
+Agent ở bất kỳ dự án nào cũng tra cứu được qua máy chủ MCP (`BentarSecondBrain.exe /mcp`). Bấm **Kết nối các agent** ở tab "5. Second Brain" (hoặc chạy `BentarSecondBrain.exe /connect`). App tự cắm Second Brain vào mọi agent có trên máy: Claude Code, Claude Desktop, Cursor, Windsurf, Codex, Gemini CLI. File cấu hình cũ được sao lưu thành `*.bak-secondbrain`. Với riêng Claude Code, có thể chạy tay:
 
 ```powershell
 claude mcp add --scope user second-brain -- "$env:LOCALAPPDATA\BentarSecondBrain\BentarSecondBrain.exe" /mcp
@@ -51,3 +51,4 @@ Chỉ mục tự cập nhật ngầm khi agent tra cứu (nếu đã cũ hơn 30
 - `/report <file>`: chỉ quét, không xoá gì, rồi ghi kết quả phân loại ra file.
 - `/mcp`: chạy máy chủ MCP qua stdio cho coding agent.
 - `/index`: cập nhật chỉ mục Second Brain rồi thoát.
+- `/connect`: cài app vào AppData và kết nối Second Brain với mọi agent trên máy.
