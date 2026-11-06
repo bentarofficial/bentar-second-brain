@@ -12,7 +12,7 @@ App dọn dẹp máy tính Windows. App quét các ổ đĩa và chia kết qu�
 App không cần cài thêm gì, chỉ dùng trình biên dịch C# có sẵn trong Windows (.NET Framework 4.x):
 
 ```powershell
-& C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /nologo /target:winexe /codepage:65001 /optimize /win32icon:src\app.ico "/out:Bentar Second Brain.exe" /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Core.dll /r:Microsoft.VisualBasic.dll /r:System.Web.Extensions.dll /r:System.IO.Compression.dll src\BentarSecondBrain.cs src\SecondBrain.cs src\Installer.cs
+& C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /nologo /target:winexe /codepage:65001 /optimize /win32icon:src\app.ico "/out:Bentar Second Brain.exe" /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Core.dll /r:Microsoft.VisualBasic.dll /r:System.Web.Extensions.dll /r:System.IO.Compression.dll src\BentarSecondBrain.cs src\SecondBrain.cs src\Installer.cs src\Memory.cs
 ```
 
 ## Cài đặt và gỡ cài đặt
@@ -45,7 +45,18 @@ Agent ở bất kỳ dự án nào cũng tra cứu được qua máy chủ MCP (
 claude mcp add --scope user second-brain -- "$env:LOCALAPPDATA\Programs\Bentar Second Brain\Bentar Second Brain.exe" /mcp
 ```
 
-Các công cụ agent dùng được: `search`, `list_projects`, `project_overview`, `read_file`, `list_dir`, `copy`, `index_status`.
+Các công cụ agent dùng được: `search`, `list_projects`, `project_overview`, `read_file`, `list_dir`, `copy`, `index_status`, và các công cụ trí nhớ `recall`, `remember`, `revise_memory`, `connect`.
+
+### Trí nhớ: tự học, tự nhớ như bộ não
+
+Second Brain là trí nhớ dài hạn dùng chung cho mọi agent, lưu ở `%LOCALAPPDATA%\BentarSecondBrain\tri-nho.json` (không đụng file của người dùng):
+
+- **Nơ-ron**: mỗi ghi nhớ (quyết định, bài học, sự thật, việc cần làm, ghi chú), mỗi dự án và mỗi file từng được dùng.
+- **Khớp thần kinh**: liên kết có độ mạnh. Ghi nhớ mới tự nối với dự án/file nguồn và các ghi nhớ gần nghĩa.
+- **Tự học**: agent đọc file, chép tài liệu, dùng nhiều dự án trong cùng phiên, hay cùng nhớ lại các ý, thì các liên kết tương ứng mạnh lên.
+- **Phai dần, không xoá**: ghi nhớ và liên kết lâu không dùng mờ dần (chu kỳ bán rã 90–120 ngày); ghi nhớ đánh dấu đã cũ được giữ lại nhưng xếp sau.
+- **Nhớ lại có liên tưởng**: `recall` trả về ghi nhớ khớp và lan sang các ý nối với chúng; `search` và `project_overview` cũng kèm ghi nhớ liên quan.
+- Ghi nhớ gần trùng được củng cố thay vì nhân bản; bản cũ giữ trong lịch sử.
 
 Second Brain **không bao giờ sửa hay xoá file**. `copy` chỉ tạo bản sao mới và từ chối ghi đè. Bỏ qua khi lập chỉ mục: thư mục hệ thống, AppData, `node_modules`, `.git`, môi trường ảo, và nội dung file bí mật (`.env`, khoá, credentials).
 

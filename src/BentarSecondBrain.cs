@@ -13,7 +13,7 @@ using System.Windows.Forms;
 
 [assembly: System.Reflection.AssemblyTitle("Bentar Second Brain")]
 [assembly: System.Reflection.AssemblyProduct("Bentar Second Brain")]
-[assembly: System.Reflection.AssemblyVersion("2.5.1.0")]
+[assembly: System.Reflection.AssemblyVersion("2.6.0.0")]
 
 // Cập nhật từ GitHub Releases: so sánh tag (vd "v2.1.0") với phiên bản app, tải file .exe mới rồi tự thay thế
 static class Updater
@@ -886,7 +886,9 @@ class MainForm : Form
     {
         var p = Brain.Progress;
         if (p.Length > 110) p = "…" + p.Substring(p.Length - 110);
-        lblBrain.Text = "Chỉ mục: " + Brain.FileCount.ToString("N0") + " file, " + Brain.ProjectCount + " dự án · cập nhật " +
+        Tuple<int, int> mc;
+        try { mc = Memory.Counts(); } catch { mc = Tuple.Create(0, 0); }
+        lblBrain.Text = "Chỉ mục: " + Brain.FileCount.ToString("N0") + " file, " + Brain.ProjectCount + " dự án · Trí nhớ: " + mc.Item1 + " ghi nhớ, " + mc.Item2 + " liên kết · cập nhật " +
             (Brain.BuiltAt == DateTime.MinValue ? "chưa có" : Brain.BuiltAt.ToString("dd/MM/yyyy HH:mm")) +
             (Brain.Building ? "\n" + p : "\nGõ từ khoá để tìm trên toàn máy (không cần gõ dấu).");
     }

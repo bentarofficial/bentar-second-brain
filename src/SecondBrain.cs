@@ -429,6 +429,15 @@ static class Brain
         catch { }
     }
 
+    // Dự án sâu nhất chứa đường dẫn này
+    public static string ProjectOf(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return null;
+        var best = Projects(null).Where(p => (path.TrimEnd('\\') + "\\").StartsWith(p.Path + "\\", StringComparison.OrdinalIgnoreCase))
+                                 .OrderByDescending(p => p.Path.Length).FirstOrDefault();
+        return best == null ? null : best.Path;
+    }
+
     public static List<BrainProject> Projects(string filter)
     {
         EnsureLoaded();
@@ -676,7 +685,10 @@ static class McpServer
     const string Instructions =
         "Bentar Second Brain là bộ nhớ chung của cả máy tính này: mọi ổ cứng, USB và thẻ nhớ, gồm tài liệu, ghi chú và mã nguồn của TẤT CẢ dự án. " +
         "Khi người dùng nhắc tới tài liệu, nghiên cứu, ghi chú, đoạn code hay một dự án khác ngoài thư mục đang làm việc, hãy dùng search hoặc list_projects để tự tìm thay vì hỏi người dùng đường dẫn. " +
-        "Tìm kiếm không phân biệt dấu tiếng Việt. Second Brain chỉ đọc, không sửa hay xoá file; muốn dùng tài liệu trong dự án hiện tại thì dùng copy để chép sang.";
+        "Tìm kiếm không phân biệt dấu tiếng Việt. Second Brain chỉ đọc, không sửa hay xoá file; muốn dùng tài liệu trong dự án hiện tại thì dùng copy để chép sang. " +
+        "Second Brain còn là TRÍ NHỚ DÀI HẠN dùng chung cho mọi agent: đầu mỗi việc, gọi recall để xem agent trước đã biết gì về chủ đề/dự án này; " +
+        "khi học được điều đáng giữ (quyết định và lý do, bài học sau khi sửa lỗi, sự thật về dự án, việc còn dang dở), gọi remember để lưu lại kèm nguồn. " +
+        "Thông tin cũ sai thì dùng revise_memory thay vì tạo ghi nhớ mới. Đừng lưu chuyện vặt hay bí mật (mật khẩu, khoá API).";
 
     public static void Run()
     {
@@ -720,6 +732,8 @@ static class McpServer
             {
                 case "initialize":
                     object pv; p.TryGetValue("protocolVersion", out pv);
+                    var ci = (p.ContainsKey("clientInfo") ? p["clientInfo"] : null) as Dictionary<string, object>;
+                    if (ci != null && ci.ContainsKey("name")) Memory.AgentName = Convert.ToString(ci["name"]);
                     result = new Dictionary<string, object> {
                         { "protocolVersion", pv as string ?? "2025-06-18" },
                         { "capabilities", new Dictionary<string, object> { { "tools", new Dictionary<string, object>() } } },
@@ -783,6 +797,27 @@ static class McpServer
                 new Dictionary<string, object> {
                     { "source", Prop("string", "File hoặc thư mục nguồn") },
                     { "destination", Prop("string", "Đường dẫn đích; nếu là thư mục đã có thì chép vào bên trong") } }, "source", "destination"),
+            Tool("recall", "Nhớ lại những gì các agent đã ghi nhớ (quyết định, bài học, sự thật, ghi chú) và các dự án/file liên quan, có liên tưởng theo mạng nơ-ron. Gọi ở đầu mỗi việc. Để trống query để xem các ghi nhớ nổi bật gần đây.",
+                new Dictionary<string, object> {
+                    { "query", Prop("string", "Chủ đề cần nhớ lại, ví dụ 'thanh toán momo' hoặc tên dự án") },
+                    { "limit", Prop("integer", "Số ghi nhớ tối đa (mặc định 10)") } }),
+            Tool("remember", "Lưu một điều đáng nhớ vào trí nhớ dài hạn dùng chung cho mọi agent. Tự nối với dự án/file nguồn và các ghi nhớ gần nghĩa; nếu gần trùng ghi nhớ cũ thì củng cố ghi nhớ đó.",
+                new Dictionary<string, object> {
+                    { "text", Prop("string", "Nội dung cần nhớ, viết đủ ý để agent khác hiểu mà không cần ngữ cảnh") },
+                    { "title", Prop("string", "Tiêu đề ngắn (tuỳ chọn)") },
+                    { "kind", Prop("string", "decision | lesson | fact | todo | note (mặc định note)") },
+                    { "source", Prop("string", "Đường dẫn file hoặc thư mục dự án liên quan, nhiều cái cách nhau bằng ';' (nên có)") },
+                    { "tags", Prop("string", "Từ khoá bổ sung để dễ nhớ lại (tuỳ chọn)") } }, "text"),
+            Tool("revise_memory", "Sửa nội dung một ghi nhớ hoặc đánh dấu nó đã cũ/sai. Bản cũ được giữ trong lịch sử; ghi nhớ đã cũ mờ dần chứ không bị xoá.",
+                new Dictionary<string, object> {
+                    { "id", Prop("string", "Mã ghi nhớ, ví dụ n12") },
+                    { "text", Prop("string", "Nội dung mới (tuỳ chọn)") },
+                    { "outdated", Prop("boolean", "true = đánh dấu đã cũ/không còn đúng") } }, "id"),
+            Tool("connect", "Nối hai ý trong trí nhớ (ghi nhớ, file hoặc dự án) khi bạn nhận ra chúng liên quan.",
+                new Dictionary<string, object> {
+                    { "a", Prop("string", "Mã ghi nhớ (n12), đường dẫn file hoặc thư mục dự án") },
+                    { "b", Prop("string", "Ý thứ hai, cùng dạng") },
+                    { "why", Prop("string", "Vì sao liên quan (tuỳ chọn)") } }, "a", "b"),
             Tool("index_status", "Trạng thái chỉ mục: số file, số dự án, lần cập nhật cuối, các ổ đang cắm. Đặt refresh=true để cập nhật lại ngay (chạy ngầm).",
                 new Dictionary<string, object> { { "refresh", Prop("boolean", "true = cập nhật chỉ mục ngay") } }),
         };
@@ -792,12 +827,7 @@ static class McpServer
     static int I(Dictionary<string, object> a, string k, int def) { int r; var s = S(a, k); return s != null && int.TryParse(s, out r) ? r : def; }
     static bool B(Dictionary<string, object> a, string k) { object v; return a.TryGetValue(k, out v) && v is bool && (bool)v; }
 
-    static string ProjectOf(string path)
-    {
-        var best = Brain.Projects(null).Where(p => (path + "\\").StartsWith(p.Path + "\\", StringComparison.OrdinalIgnoreCase))
-                                       .OrderByDescending(p => p.Path.Length).FirstOrDefault();
-        return best == null ? null : best.Path;
-    }
+    static string ProjectOf(string path) { return Brain.ProjectOf(path); }
 
     static string Note()
     {
@@ -828,8 +858,22 @@ static class McpServer
                     if (proj != null) sb.AppendLine("  Dự án: " + proj);
                     if (h.Snippet != null) foreach (var l in h.Snippet.Split('\n')) sb.AppendLine("    " + l.TrimEnd());
                 }
+                var mem = Memory.RecallRaw(q, 3, false).Where(r => r.N.Kind != "file").ToList();
+                if (mem.Count > 0) sb.AppendLine().AppendLine("Ghi nhớ liên quan (gọi recall để xem thêm):").AppendLine(Memory.Format(mem, false));
                 return sb.ToString().TrimEnd() + Note();
             }
+            case "recall":
+            {
+                var list = Memory.RecallRaw(S(a, "query"), Math.Max(1, Math.Min(50, I(a, "limit", 10))), true);
+                if (list.Count == 0) return "Chưa có ghi nhớ nào về \"" + S(a, "query") + "\". Khi học được điều đáng giữ, hãy dùng remember.";
+                return "Nhớ lại được " + list.Count + " ý:\n" + Memory.Format(list, true);
+            }
+            case "remember":
+                return Memory.Remember(S(a, "text"), S(a, "title"), S(a, "kind"), S(a, "source"), S(a, "tags"));
+            case "revise_memory":
+                return Memory.Revise(S(a, "id"), S(a, "text"), B(a, "outdated"));
+            case "connect":
+                return Memory.Connect(S(a, "a"), S(a, "b"), S(a, "why"));
             case "list_projects":
             {
                 var list = Brain.Projects(S(a, "filter"));
@@ -859,6 +903,9 @@ static class McpServer
                     sb.AppendLine().AppendLine("===== " + n + (lines.Length > 200 ? " (200/" + lines.Length + " dòng đầu)" : "") + " =====");
                     foreach (var l in lines.Take(200)) sb.AppendLine(l.TrimEnd('\r'));
                 }
+                var memo = Memory.ForProject(di.FullName);
+                if (memo.Length > 0) sb.AppendLine().AppendLine("===== Trí nhớ Second Brain =====").AppendLine(memo);
+                Memory.Experience(di.FullName);
                 return sb.ToString().TrimEnd();
             }
             case "read_file":
@@ -887,6 +934,7 @@ static class McpServer
                     sb.Append(i + 1).Append('\t').AppendLine(l);
                 }
                 if (end < all.Length) sb.AppendLine("… còn " + (all.Length - end) + " dòng, gọi lại với start_line=" + (end + 1));
+                Memory.Experience(path);
                 return sb.ToString().TrimEnd();
             }
             case "list_dir":
@@ -908,7 +956,11 @@ static class McpServer
                 return sb.ToString().TrimEnd();
             }
             case "copy":
-                return Brain.Copy(S(a, "source"), S(a, "destination"));
+            {
+                var res = Brain.Copy(S(a, "source"), S(a, "destination"));
+                Memory.Copied(S(a, "source"), S(a, "destination"));
+                return res;
+            }
             case "index_status":
             {
                 Brain.EnsureLoaded();
@@ -916,6 +968,8 @@ static class McpServer
                 Thread.Sleep(100);
                 sb.AppendLine("Số file trong chỉ mục: " + Brain.FileCount.ToString("N0"));
                 sb.AppendLine("Số dự án: " + Brain.ProjectCount);
+                var mc = Memory.Counts();
+                sb.AppendLine("Trí nhớ: " + mc.Item1 + " ghi nhớ, " + mc.Item2 + " liên kết");
                 sb.AppendLine("Cập nhật lần cuối: " + (Brain.BuiltAt == DateTime.MinValue ? "chưa có" : Brain.BuiltAt.ToString("dd/MM/yyyy HH:mm")));
                 sb.AppendLine("Đang cập nhật: " + (Brain.Building ? "có — " + Brain.Progress : "không"));
                 sb.Append("Ổ đang cắm: " + string.Join(", ", Brain.Drives().Select(d => d.Name.TrimEnd('\\'))));
