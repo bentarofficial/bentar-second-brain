@@ -1,4 +1,4 @@
-// PC master cleand by Bentar - dọn các mục an toàn, có chế độ tự động theo lịch
+// Bentar Second Brain - dọn các mục an toàn, có chế độ tự động theo lịch
 // Chạy "app.exe /auto" để dọn ngầm theo cài đặt đã lưu (dùng cho Task Scheduler)
 using System;
 using System.Collections.Generic;
@@ -11,14 +11,14 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
-[assembly: System.Reflection.AssemblyTitle("PC master cleand by Bentar")]
-[assembly: System.Reflection.AssemblyProduct("PC master cleand by Bentar")]
-[assembly: System.Reflection.AssemblyVersion("2.1.0.0")]
+[assembly: System.Reflection.AssemblyTitle("Bentar Second Brain")]
+[assembly: System.Reflection.AssemblyProduct("Bentar Second Brain")]
+[assembly: System.Reflection.AssemblyVersion("2.2.0.0")]
 
 // Cập nhật từ GitHub Releases: so sánh tag (vd "v2.1.0") với phiên bản app, tải file .exe mới rồi tự thay thế
 static class Updater
 {
-    const string Repo = "bentarofficial/pc-master-clean-by-bentar";
+    const string Repo = "bentarofficial/bentar-second-brain";
     public static readonly Version Current = typeof(Updater).Assembly.GetName().Version;
 
     public class Release { public Version Version; public string Tag, ExeUrl, Notes; }
@@ -27,7 +27,7 @@ static class Updater
     {
         System.Net.ServicePointManager.SecurityProtocol |= System.Net.SecurityProtocolType.Tls12;
         var wc = new System.Net.WebClient { Encoding = Encoding.UTF8 };
-        wc.Headers.Add("User-Agent", "PCMasterClean");
+        wc.Headers.Add("User-Agent", "BentarSecondBrain");
         return wc;
     }
 
@@ -49,11 +49,11 @@ static class Updater
     public static void DownloadAndRestart(Release r)
     {
         string target = Application.ExecutablePath;
-        string newExe = Path.Combine(Path.GetTempPath(), "PCMasterClean-" + r.Tag + ".exe");
+        string newExe = Path.Combine(Path.GetTempPath(), "BentarSecondBrain-" + r.Tag + ".exe");
         using (var wc = Client()) wc.DownloadFile(r.ExeUrl, newExe);
         if (new FileInfo(newExe).Length < 10 * 1024) throw new Exception("File tải về không hợp lệ.");
 
-        string installed = Path.Combine(Cleaner.DataDir, "PCMasterClean.exe");   // bản dùng cho lịch tự động
+        string installed = Path.Combine(Cleaner.DataDir, "BentarSecondBrain.exe");   // bản dùng cho lịch tự động
         Func<string, string> q = s => "'" + s.Replace("'", "''") + "'";
         string script =
             "$p=" + Process.GetCurrentProcess().Id + "; while(Get-Process -Id $p -ErrorAction SilentlyContinue){Start-Sleep -Milliseconds 300};" +
@@ -86,9 +86,9 @@ static class Cleaner
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
     static extern int SHEmptyRecycleBin(IntPtr hwnd, string root, uint flags);
 
-    public const string AppName = "PC master cleand by Bentar";
+    public const string AppName = "Bentar Second Brain";
     static readonly string Local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-    public static readonly string DataDir = Path.Combine(Local, "PCMasterClean");
+    public static readonly string DataDir = Path.Combine(Local, "BentarSecondBrain");
     public static readonly string SettingsFile = Path.Combine(DataDir, "settings.ini");
     public static readonly string LogFile = Path.Combine(DataDir, "nhat-ky.txt");
 
@@ -260,8 +260,8 @@ class Settings
 
 static class Scheduler
 {
-    const string TaskName = "PC master cleand by Bentar - Tu dong don dep";
-    static readonly string InstalledExe = Path.Combine(Cleaner.DataDir, "PCMasterClean.exe");
+    const string TaskName = "Bentar Second Brain - Tu dong don dep";
+    static readonly string InstalledExe = Path.Combine(Cleaner.DataDir, "BentarSecondBrain.exe");
 
     static int Schtasks(string args)
     {
@@ -290,7 +290,7 @@ static class Scheduler
         string xml =
 "<?xml version=\"1.0\" encoding=\"UTF-16\"?>\n" +
 "<Task version=\"1.2\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">\n" +
-"  <RegistrationInfo><Description>Tu dong don dep file rac - PC master cleand by Bentar</Description></RegistrationInfo>\n" +
+"  <RegistrationInfo><Description>Tu dong don dep file rac - Bentar Second Brain</Description></RegistrationInfo>\n" +
 "  <Triggers>" + trigger + "</Triggers>\n" +
 "  <Principals><Principal id=\"Author\"><UserId>" + user + "</UserId><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals>\n" +
 "  <Settings>\n" +
@@ -303,7 +303,7 @@ static class Scheduler
 "  <Actions Context=\"Author\"><Exec><Command>" + System.Security.SecurityElement.Escape(InstalledExe) + "</Command><Arguments>/auto</Arguments></Exec></Actions>\n" +
 "</Task>";
 
-        string xmlFile = Path.Combine(Path.GetTempPath(), "pcmasterclean-task.xml");
+        string xmlFile = Path.Combine(Path.GetTempPath(), "bentarsecondbrain-task.xml");
         File.WriteAllText(xmlFile, xml, Encoding.Unicode);
         int code = Schtasks("/Create /TN \"" + TaskName + "\" /XML \"" + xmlFile + "\" /F");
         try { File.Delete(xmlFile); } catch { }
@@ -311,6 +311,30 @@ static class Scheduler
     }
 
     public static void Disable() { Schtasks("/Delete /TN \"" + TaskName + "\" /F"); }
+
+    // Chuyển từ tên cũ "PC master cleand by Bentar" (bản 2.1 trở về trước): chép cài đặt, nhật ký và đổi lịch sang tên mới
+    public static void MigrateFromOldName()
+    {
+        const string oldTask = "PC master cleand by Bentar - Tu dong don dep";
+        string oldDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PCMasterClean");
+        try
+        {
+            if (Directory.Exists(oldDir) && !File.Exists(Cleaner.SettingsFile))
+            {
+                Directory.CreateDirectory(Cleaner.DataDir);
+                foreach (var name in new[] { "settings.ini", "nhat-ky.txt" })
+                    if (File.Exists(Path.Combine(oldDir, name))) File.Copy(Path.Combine(oldDir, name), Path.Combine(Cleaner.DataDir, name), true);
+            }
+            if (Schtasks("/Query /TN \"" + oldTask + "\"") == 0)
+            {
+                var s = Settings.Load();
+                if (s.AutoEnabled) Enable(s);
+                Schtasks("/Delete /TN \"" + oldTask + "\" /F");
+                Cleaner.Log("Đã chuyển lịch tự động sang tên mới Bentar Second Brain");
+            }
+        }
+        catch { }
+    }
 
     public static bool Exists() { return Schtasks("/Query /TN \"" + TaskName + "\"") == 0; }
 }
@@ -1054,6 +1078,7 @@ class MainForm : Form
     {
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
+        Scheduler.MigrateFromOldName();
         if (args.Any(a => a.Equals("/auto", StringComparison.OrdinalIgnoreCase))) { RunAuto(); return; }
         // /report <file>: chỉ quét (không xoá gì) và ghi kết quả phân loại ra file
         if (args.Length == 2 && args[0].Equals("/report", StringComparison.OrdinalIgnoreCase)) { WriteReport(args[1]); return; }

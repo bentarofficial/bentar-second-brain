@@ -1,4 +1,4 @@
-# PC master cleand by Bentar
+# Bentar Second Brain
 
 App dọn dẹp máy tính Windows. App quét các ổ đĩa và chia kết quả thành 4 nhóm:
 
@@ -12,7 +12,7 @@ App dọn dẹp máy tính Windows. App quét các ổ đĩa và chia kết qu�
 App không cần cài thêm gì, chỉ dùng trình biên dịch C# có sẵn trong Windows (.NET Framework 4.x):
 
 ```powershell
-& C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /nologo /target:winexe /codepage:65001 /optimize "/out:PC master cleand by Bentar.exe" /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Core.dll /r:Microsoft.VisualBasic.dll src\PCMasterClean.cs
+& C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /nologo /target:winexe /codepage:65001 /optimize "/out:Bentar Second Brain.exe" /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Core.dll /r:Microsoft.VisualBasic.dll src\BentarSecondBrain.cs
 ```
 
 ## Cập nhật
@@ -21,12 +21,12 @@ Bấm nút **Kiểm tra cập nhật** trong app. App sẽ đọc bản phát h�
 
 Cách phát hành một phiên bản mới:
 
-1. Tăng số trong `AssemblyVersion` ở đầu file `src/PCMasterClean.cs`, ví dụ `2.2.0.0`.
+1. Tăng số trong `AssemblyVersion` ở đầu file `src/BentarSecondBrain.cs`, ví dụ `2.3.0.0`.
 2. Biên dịch lại theo lệnh ở mục trên.
 3. Tạo bản phát hành có tag khớp với số phiên bản, và đính kèm file `.exe`:
 
 ```powershell
-gh release create v2.2.0 "PC master cleand by Bentar.exe" --title "v2.2.0" --notes "Có gì mới..."
+gh release create v2.3.0 "Bentar Second Brain.exe" --title "v2.3.0" --notes "Có gì mới..."
 ```
 
 ## Tham số dòng lệnh
