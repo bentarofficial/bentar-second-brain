@@ -12,7 +12,7 @@ App dọn dẹp máy tính Windows. App quét các ổ đĩa và chia kết qu�
 App không cần cài thêm gì, chỉ dùng trình biên dịch C# có sẵn trong Windows (.NET Framework 4.x):
 
 ```powershell
-& C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /nologo /target:winexe /codepage:65001 /optimize /win32icon:src\app.ico "/out:Bentar Second Brain.exe" /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Core.dll /r:Microsoft.VisualBasic.dll /r:System.Web.Extensions.dll /r:System.IO.Compression.dll src\BentarSecondBrain.cs src\SecondBrain.cs src\Installer.cs src\Memory.cs src\BrainMap.cs
+& C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /nologo /target:winexe /codepage:65001 /optimize /win32icon:src\app.ico "/out:Bentar Second Brain.exe" /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Core.dll /r:Microsoft.VisualBasic.dll /r:System.Web.Extensions.dll /r:System.IO.Compression.dll /r:System.Security.dll src\*.cs
 ```
 
 ## Cài đặt và gỡ cài đặt
@@ -71,6 +71,28 @@ Second Brain **không bao giờ sửa hay xoá file**. `copy` chỉ tạo bản 
 
 Chỉ mục tự cập nhật ngầm khi agent tra cứu (nếu đã cũ hơn 30 phút), hoặc bấm **Cập nhật chỉ mục**, hoặc chạy `BentarSecondBrain.exe /index`.
 
+## Trạm phát: một bộ não, mọi agent cắm vào
+
+Second Brain là nguồn điện, các agent và công cụ là bóng đèn. Sau khi cài, trạm phát (`BentarSecondBrain.exe /serve`) tự chạy ngầm khi bật máy và mở ba kiểu ổ cắm dùng chung một bộ não:
+
+| Ổ cắm | Dành cho | Địa chỉ |
+|---|---|---|
+| MCP stdio | Claude Code, Codex, Gemini CLI, Cursor... | `"Bentar Second Brain.exe" /mcp` |
+| MCP qua HTTP | Agent hỗ trợ MCP từ xa | `POST http://127.0.0.1:7801/mcp` |
+| REST + OpenAPI | n8n, script, tiện ích trình duyệt, agent tự xây | `GET/POST http://127.0.0.1:7801/api/<công cụ>`, mô tả ở `/openapi.json` |
+
+Ổ cắm HTTP chỉ nghe trên máy này, mỗi yêu cầu cần mã khoá (`Authorization: Bearer <mã>`), lấy trong `%LOCALAPPDATA%\BentarSecondBrain\o-cam.json`; tên miền lạ trỏ về máy bị chặn. Đặt tên thiết bị bằng header `X-Client-Name`. Mọi lần cắm và dùng được ghi vào `hoat-dong.jsonl`.
+
+## Giữ bộ não cả đời: sao lưu lên GitHub riêng tư
+
+Lần đầu mở app, app hỏi: khôi phục bộ não cũ, tạo mới và sao lưu lên GitHub, hay để sau (app sẽ báo đỏ cho tới khi sao lưu).
+
+- Bộ não được sao lưu vào một repo GitHub riêng tư; mỗi lần sao lưu là một commit, nên giữ được mọi phiên bản cả đời.
+- Chỉ có dữ liệu đã mã hoá rời khỏi máy: `bo-nao.sbak` (trí nhớ JSON + bản Markdown đọc được), mã hoá bằng mã khôi phục; `khoa.enc` là mã khôi phục, mã hoá bằng mật khẩu của bạn. Chỉ cần mật khẩu hoặc mã khôi phục là mở được; mất cả hai thì không ai mở được.
+- Định dạng chuẩn OpenSSL nên không cần app vẫn mở được: `openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -md sha256 -in bo-nao.sbak -out bo-nao.zip -pass pass:"MÃ-KHÔI-PHỤC"`.
+- Trạm phát tự sao lưu khi trí nhớ thay đổi (kiểm tra 10 phút một lần) và mỗi tuần tự mở thử bản sao lưu; lỗi hoặc quá 3 ngày chưa sao lưu thì app báo đỏ.
+- Đổi máy / mất máy: cài app, chọn **Khôi phục**, đăng nhập GitHub, chọn repo có dấu ★, nhập mật khẩu hoặc mã khôi phục. Chỉ mục file sẽ tự quét lại trên máy mới.
+
 ## Tham số dòng lệnh
 
 - `/auto`: dọn ngầm theo cài đặt đã lưu (Task Scheduler gọi chế độ này).
@@ -80,3 +102,5 @@ Chỉ mục tự cập nhật ngầm khi agent tra cứu (nếu đã cũ hơn 30
 - `/connect`: cài app vào AppData và kết nối Second Brain với mọi agent trên máy.
 - `/install`: cài vào máy.
 - `/uninstall [/quiet]`: gỡ cài đặt, giữ nguyên dữ liệu.
+- `/serve`: chạy trạm phát (ổ cắm HTTP, tự sao lưu).
+- `/backup-setup <repo> <mật khẩu>`, `/backup`, `/backup-verify`, `/restore <repo> <mật khẩu hoặc mã khôi phục>`: sao lưu và khôi phục bằng dòng lệnh.

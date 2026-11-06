@@ -13,7 +13,7 @@ using System.Windows.Forms;
 
 [assembly: System.Reflection.AssemblyTitle("Bentar Second Brain")]
 [assembly: System.Reflection.AssemblyProduct("Bentar Second Brain")]
-[assembly: System.Reflection.AssemblyVersion("2.7.0.0")]
+[assembly: System.Reflection.AssemblyVersion("2.8.0.0")]
 
 // Cập nhật từ GitHub Releases: so sánh tag (vd "v2.1.0") với phiên bản app, tải file .exe mới rồi tự thay thế
 static class Updater
@@ -792,6 +792,7 @@ class MainForm : Form
         // Neo khi cửa sổ vừa hiện (các tab đã có kích thước thật), trước khi người dùng kéo giãn
         Shown += (s, e) => MakeResizable(tabs, grp, lblVer);
         Shown += async (s, e) => await CheckUpdate(false);
+        Shown += (s, e) => BeginInvoke(new Action(() => BackupUI.FirstRun(this)));   // lần đầu: khôi phục / tạo mới + sao lưu / để sau
         UpdateInfo();
     }
 
@@ -856,7 +857,8 @@ class MainForm : Form
     }
 
     // --- Tab 5: Second Brain – chỉ mục toàn máy cho agent tra cứu ---
-    readonly Label lblBrain = new Label();
+    readonly Label lblBrain = new Label(), lblBackup = new Label();
+    int backupTick;
     readonly TextBox txtBrain = new TextBox();
     readonly ListView brainHits = new ListView();
 
@@ -898,9 +900,23 @@ class MainForm : Form
         var btnConnect = new Button { Text = "Kết nối các agent", BackColor = Color.FromArgb(58, 42, 160), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
         btnConnect.SetBounds(176, 286, 180, 36);
         btnConnect.Click += async (s, e) => await ConnectAgents();
-        var note = new Label { Text = "Agent ở mọi dự án tra cứu được tài liệu trên mọi ổ, USB, thẻ nhớ.\nChỉ đọc và sao chép – không bao giờ sửa hay xoá file.",
-            Location = new Point(364, 284), Size = new Size(344, 40), ForeColor = Color.DimGray, Font = new Font("Segoe UI", 8) };
-        t.Controls.AddRange(new Control[] { lblBrain, txtBrain, btnFind, brainHits, btnIndex, btnConnect, note });
+        // Giữ bộ não cả đời: sao lưu mã hoá lên GitHub riêng tư, khôi phục khi đổi / mất máy
+        var btnBackup = new Button { Text = Backup.Configured ? "Sao lưu ngay" : "Sao lưu bộ não" };
+        btnBackup.SetBounds(364, 286, 130, 36);
+        btnBackup.Click += async (s, e) =>
+        {
+            if (!Backup.Configured) { BackupUI.Setup(this); btnBackup.Text = Backup.Configured ? "Sao lưu ngay" : "Sao lưu bộ não"; return; }
+            btnBackup.Enabled = false;
+            var r = await Task.Run(() => Backup.Run(true));
+            btnBackup.Enabled = true;
+            MessageBox.Show(this, r, Text);
+        };
+        var btnRestore = new Button { Text = "Khôi phục" };
+        btnRestore.SetBounds(500, 286, 100, 36);
+        btnRestore.Click += (s, e) => BackupUI.Restore(this);
+        lblBackup.SetBounds(606, 284, 104, 40);
+        lblBackup.Font = new Font("Segoe UI", 7.5f);
+        t.Controls.AddRange(new Control[] { lblBrain, txtBrain, btnFind, brainHits, btnIndex, btnConnect, btnBackup, btnRestore, lblBackup });
 
         var timer = new Timer { Interval = 1000 };
         timer.Tick += (s, e) => ShowBrainStatus();
@@ -911,6 +927,13 @@ class MainForm : Form
 
     void ShowBrainStatus()
     {
+        if (backupTick++ % 10 == 0)   // trạng thái sao lưu: báo đỏ nếu chưa sao lưu / lỗi / quá 3 ngày
+        {
+            var w = Backup.Warning();
+            DateTime ok;
+            lblBackup.ForeColor = w != null ? Color.Firebrick : Color.SeaGreen;
+            lblBackup.Text = w ?? ("Đã sao lưu " + (DateTime.TryParse(Backup.Status().LastOk, out ok) ? ok.ToString("HH:mm dd/MM") : ""));
+        }
         var p = Brain.Progress;
         if (p.Length > 110) p = "…" + p.Substring(p.Length - 110);
         Tuple<int, int> mc;
@@ -1235,6 +1258,26 @@ class MainForm : Form
         if (args.Length == 2 && args[0].Equals("/report", StringComparison.OrdinalIgnoreCase)) { WriteReport(args[1]); return; }
         // /mcp: máy chủ MCP cho coding agent; /index: cập nhật chỉ mục Second Brain rồi thoát
         if (args.Any(a => a.Equals("/mcp", StringComparison.OrdinalIgnoreCase))) { McpServer.Run(); return; }
+        // /serve: trạm phát chạy ngầm, mở ổ cắm HTTP cho mọi agent / công cụ
+        if (args.Any(a => a.Equals("/serve", StringComparison.OrdinalIgnoreCase))) { PowerStation.Serve(); return; }
+        // Sao lưu / khôi phục bộ não bằng dòng lệnh, in kết quả ra stdout:
+        //   /backup-setup <repo> <mật khẩu>   /backup   /backup-verify   /restore <repo> <mật khẩu hoặc mã khôi phục>
+        if (args.Length > 0 && new[] { "/backup-setup", "/backup", "/backup-verify", "/restore" }.Contains(args[0].ToLowerInvariant()))
+        {
+            using (var o = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false)) { AutoFlush = true })
+                try
+                {
+                    switch (args[0].ToLowerInvariant())
+                    {
+                        case "/backup-setup": o.WriteLine("MÃ KHÔI PHỤC (chép lại, chỉ hiện một lần): " + Backup.Setup(args[1], args[2])); break;
+                        case "/backup": o.WriteLine(Backup.Run(true)); break;
+                        case "/backup-verify": o.WriteLine(Backup.Verify()); break;
+                        case "/restore": o.WriteLine(Backup.Restore(args[1], args[2])); break;
+                    }
+                }
+                catch (Exception ex) { o.WriteLine("Lỗi: " + ex.Message); Environment.Exit(1); }
+            return;
+        }
         // /install: cài vào máy (lối tắt, Settings → Apps); /uninstall [/quiet]: gỡ, giữ nguyên dữ liệu người dùng
         if (args.Any(a => a.Equals("/install", StringComparison.OrdinalIgnoreCase))) { Installer.Install(); return; }
         if (args.Any(a => a.Equals("/uninstall", StringComparison.OrdinalIgnoreCase))) { Installer.Uninstall(args.Any(a => a.Equals("/quiet", StringComparison.OrdinalIgnoreCase))); return; }
@@ -1253,6 +1296,7 @@ class MainForm : Form
         if (Installer.OfferOnStart()) return;   // đã chuyển sang mở bản vừa cài
         Installer.RefreshRegistration();
         Installer.CleanupOld();
+        PowerStation.EnsureRunning(Installer.IsInstalled ? Installer.Exe : Application.ExecutablePath);
         Application.Run(new MainForm());
     }
 }

@@ -19,6 +19,7 @@ static class Installer
     const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\BentarSecondBrain";
     static readonly string StartLnk = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), Cleaner.AppName + ".lnk");
     static readonly string DesktopLnk = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), Cleaner.AppName + ".lnk");
+    static readonly string StartupLnk = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Startup), Cleaner.AppName + " - tram phat.lnk");
     static readonly string NoPromptFile = Path.Combine(Cleaner.DataDir, "khong-hoi-cai-dat");
 
     public static bool IsInstalled { get { return File.Exists(Exe); } }
@@ -59,8 +60,9 @@ static class Installer
         Directory.CreateDirectory(Dir);
         CleanupOld();
         CopyOver(Application.ExecutablePath, Exe);
-        Shortcut(StartLnk);
-        Shortcut(DesktopLnk);
+        Shortcut(StartLnk, "");
+        Shortcut(DesktopLnk, "");
+        Shortcut(StartupLnk, "/serve");   // trạm phát tự chạy ngầm mỗi khi bật máy
         Register();
         try { File.Delete(NoPromptFile); } catch { }
 
@@ -73,6 +75,7 @@ static class Installer
             catch { try { File.Move(LegacyExe, LegacyExe + "." + DateTime.Now.Ticks + ".old"); } catch { } }
         }
         Cleaner.Log("Đã cài Bentar Second Brain " + Updater.Current.ToString(3) + " vào " + Dir);
+        PowerStation.EnsureRunning(Exe);
     }
 
     // Chép đè; nếu file đích đang chạy (agent đang dùng /mcp) thì Windows chỉ cho đổi tên, nên đổi tên bản cũ sang .old rồi chép
@@ -103,7 +106,7 @@ static class Installer
             return sha.ComputeHash(sa).SequenceEqual(sha.ComputeHash(sb));
     }
 
-    static void Shortcut(string lnk)
+    static void Shortcut(string lnk, string arguments)
     {
         var t = Type.GetTypeFromProgID("WScript.Shell");
         object shell = Activator.CreateInstance(t);
@@ -111,6 +114,8 @@ static class Installer
         var st = sc.GetType();
         Action<string, object> set = (k, v) => st.InvokeMember(k, BindingFlags.SetProperty, null, sc, new[] { v });
         set("TargetPath", Exe);
+        set("Arguments", arguments);
+        if (arguments.Length > 0) set("WindowStyle", 7);
         set("WorkingDirectory", Dir);
         set("IconLocation", Exe + ",0");
         set("Description", "Dọn dẹp máy và bộ nhớ chung cho các agent");
@@ -155,7 +160,7 @@ static class Installer
 
         try { Scheduler.Disable(); } catch { }
         try { AgentLinks.DisconnectAll(); } catch { }
-        foreach (var l in new[] { StartLnk, DesktopLnk }) try { File.Delete(l); } catch { }
+        foreach (var l in new[] { StartLnk, DesktopLnk, StartupLnk }) try { File.Delete(l); } catch { }
         try { Registry.CurrentUser.DeleteSubKeyTree(UninstallKey, false); } catch { }
         Cleaner.Log("Đã gỡ Bentar Second Brain (giữ lại cài đặt, nhật ký, chỉ mục)");
 

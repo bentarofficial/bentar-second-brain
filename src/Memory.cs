@@ -53,7 +53,7 @@ static class Memory
     static readonly Mutex mutex = new Mutex(false, @"Local\BentarSecondBrainMemory");   // nhiều agent có thể ghi cùng lúc
     static MemoryStore store;
     static DateTime loadedStamp;
-    public static string AgentName = "agent";
+    [ThreadStatic] public static string AgentName;   // thiết bị đang gọi (mỗi luồng một thiết bị)
 
     public static readonly Dictionary<string, string> KindNames = new Dictionary<string, string> {
         { "note", "ghi-chu" }, { "decision", "quyet-dinh" }, { "lesson", "bai-hoc" }, { "fact", "su-that" }, { "todo", "viec-can-lam" } };
@@ -107,6 +107,19 @@ static class Memory
                 Created = n.Created, Updated = n.Updated, LastUsed = n.LastUsed, Uses = n.Uses, Outdated = n.Outdated }).ToList(),
             s.Synapses.Select(y => new Synapse { A = y.A, B = y.B, Weight = EffectiveWeight(y), LastFired = y.LastFired, Why = y.Why }).ToList()));
     }
+    // Thay toàn bộ trí nhớ bằng bản khôi phục (giữ khoá để agent khác không ghi chen vào giữa)
+    public static void ReplaceAll(string json)
+    {
+        if (Json.Deserialize<MemoryStore>(json) == null) throw new InvalidDataException("Bản trí nhớ không hợp lệ.");
+        With(false, s =>
+        {
+            Directory.CreateDirectory(Cleaner.DataDir);
+            File.WriteAllText(File_, json, new UTF8Encoding(false));
+            store = null;
+            return 0;
+        });
+    }
+
     public static double VitalityOf(Neuron n) { return Vitality(n); }
     public static string Label(string kind) { return KindLabel(kind); }
 

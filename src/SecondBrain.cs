@@ -709,11 +709,18 @@ static class McpServer
             catch { Send(new Dictionary<string, object> { { "jsonrpc", "2.0" }, { "id", null }, { "error", Err(-32700, "Parse error") } }); continue; }
             var m = msg;
             // Mỗi yêu cầu chạy riêng để một lệnh tìm chậm không chặn các lệnh khác
-            Task.Run(() => Handle(m));
+            Task.Run(() =>
+            {
+                string named;
+                var resp = Process(m, stdioClient, "mcp", out named);
+                if (named != null) stdioClient = named;
+                if (resp != null) Send(resp);
+            });
         }
     }
+    static volatile string stdioClient = "agent";
 
-    static Dictionary<string, object> Err(int code, string message) { return new Dictionary<string, object> { { "code", code }, { "message", message } }; }
+    public static Dictionary<string, object> Err(int code, string message) { return new Dictionary<string, object> { { "code", code }, { "message", message } }; }
 
     static void Send(object o)
     {
@@ -721,12 +728,15 @@ static class McpServer
         lock (writeGate) output.WriteLine(s);
     }
 
-    static void Handle(Dictionary<string, object> msg)
+    // Xử lý một thông điệp JSON-RPC của MCP, dùng chung cho mọi ổ cắm (stdio, HTTP).
+    // client: tên thiết bị đang cắm; named: tên mới nếu thông điệp là "initialize". Trả null với thông báo (không cần trả lời).
+    public static Dictionary<string, object> Process(Dictionary<string, object> msg, string client, string channel, out string named)
     {
+        named = null;
         object id; msg.TryGetValue("id", out id);
         object mo; msg.TryGetValue("method", out mo);
         string method = mo as string;
-        if (method == null) return;                       // phản hồi từ client: bỏ qua
+        if (method == null) return null;                  // phản hồi từ client: bỏ qua
         bool isRequest = msg.ContainsKey("id");
         var p = (msg.ContainsKey("params") ? msg["params"] : null) as Dictionary<string, object> ?? new Dictionary<string, object>();
         object result = null; Dictionary<string, object> error = null;
@@ -737,7 +747,8 @@ static class McpServer
                 case "initialize":
                     object pv; p.TryGetValue("protocolVersion", out pv);
                     var ci = (p.ContainsKey("clientInfo") ? p["clientInfo"] : null) as Dictionary<string, object>;
-                    if (ci != null && ci.ContainsKey("name")) Memory.AgentName = Convert.ToString(ci["name"]);
+                    if (ci != null && ci.ContainsKey("name")) named = client = Convert.ToString(ci["name"]);
+                    Activity.Log(client, channel, "cắm vào", "");
                     result = new Dictionary<string, object> {
                         { "protocolVersion", pv as string ?? "2025-06-18" },
                         { "capabilities", new Dictionary<string, object> { { "tools", new Dictionary<string, object>() } } },
@@ -749,25 +760,38 @@ static class McpServer
                 case "tools/call":
                     string name = p.ContainsKey("name") ? p["name"] as string : null;
                     var args = (p.ContainsKey("arguments") ? p["arguments"] : null) as Dictionary<string, object> ?? new Dictionary<string, object>();
-                    string text; bool isError = false;
-                    try { text = CallTool(name, args); }
-                    catch (Exception ex) { text = "Lỗi: " + ex.Message; isError = true; }
+                    string text; bool isError;
+                    text = Invoke(client, channel, name, args, out isError);
                     result = new Dictionary<string, object> {
                         { "content", new object[] { new Dictionary<string, object> { { "type", "text" }, { "text", text } } } },
                         { "isError", isError } };
                     break;
                 default:
-                    if (method.StartsWith("notifications/")) return;
+                    if (method.StartsWith("notifications/")) return null;
                     error = Err(-32601, "Method not found: " + method);
                     break;
             }
         }
         catch (Exception ex) { error = Err(-32603, ex.Message); }
-        if (!isRequest) return;
+        if (!isRequest) return null;
         var resp = new Dictionary<string, object> { { "jsonrpc", "2.0" }, { "id", id } };
         if (error != null) resp["error"] = error; else resp["result"] = result;
-        Send(resp);
+        return resp;
     }
+
+    // Gọi một công cụ cho một thiết bị: ghi tên thiết bị vào trí nhớ và ghi nhật ký hoạt động (đồng hồ điện)
+    public static string Invoke(string client, string channel, string name, Dictionary<string, object> args, out bool isError)
+    {
+        Memory.AgentName = client;
+        isError = false;
+        string text;
+        try { text = CallTool(name, args); }
+        catch (Exception ex) { text = "Lỗi: " + ex.Message; isError = true; }
+        Activity.Log(client, channel, name, Activity.Summary(name, args) + (isError ? " (lỗi)" : ""));
+        return text;
+    }
+
+    public static object[] Tools() { return ToolList(); }
 
     static Dictionary<string, object> Tool(string name, string desc, Dictionary<string, object> props, params string[] required)
     {
