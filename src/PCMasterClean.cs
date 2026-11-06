@@ -13,7 +13,59 @@ using System.Windows.Forms;
 
 [assembly: System.Reflection.AssemblyTitle("PC master cleand by Bentar")]
 [assembly: System.Reflection.AssemblyProduct("PC master cleand by Bentar")]
-[assembly: System.Reflection.AssemblyVersion("2.0.0.0")]
+[assembly: System.Reflection.AssemblyVersion("2.1.0.0")]
+
+// Cập nhật từ GitHub Releases: so sánh tag (vd "v2.1.0") với phiên bản app, tải file .exe mới rồi tự thay thế
+static class Updater
+{
+    const string Repo = "bentarofficial/pc-master-clean-by-bentar";
+    public static readonly Version Current = typeof(Updater).Assembly.GetName().Version;
+
+    public class Release { public Version Version; public string Tag, ExeUrl, Notes; }
+
+    static System.Net.WebClient Client()
+    {
+        System.Net.ServicePointManager.SecurityProtocol |= System.Net.SecurityProtocolType.Tls12;
+        var wc = new System.Net.WebClient { Encoding = Encoding.UTF8 };
+        wc.Headers.Add("User-Agent", "PCMasterClean");
+        return wc;
+    }
+
+    public static Release Latest()
+    {
+        string json;
+        using (var wc = Client()) json = wc.DownloadString("https://api.github.com/repos/" + Repo + "/releases/latest");
+        var tag = System.Text.RegularExpressions.Regex.Match(json, "\"tag_name\"\\s*:\\s*\"v?([0-9.]+)\"");
+        var url = System.Text.RegularExpressions.Regex.Match(json, "\"browser_download_url\"\\s*:\\s*\"([^\"]+\\.exe)\"");
+        var body = System.Text.RegularExpressions.Regex.Match(json, "\"body\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"");
+        if (!tag.Success || !url.Success) return null;
+        var v = new Version(tag.Groups[1].Value);
+        v = new Version(v.Major, v.Minor, Math.Max(0, v.Build), Math.Max(0, v.Revision));
+        string notes = body.Success ? System.Text.RegularExpressions.Regex.Unescape(body.Groups[1].Value) : "";
+        return new Release { Version = v, Tag = tag.Groups[1].Value, ExeUrl = url.Groups[1].Value, Notes = notes };
+    }
+
+    // Tải bản mới, rồi nhờ một PowerShell chạy ngầm chờ app thoát, chép đè file .exe và mở lại app
+    public static void DownloadAndRestart(Release r)
+    {
+        string target = Application.ExecutablePath;
+        string newExe = Path.Combine(Path.GetTempPath(), "PCMasterClean-" + r.Tag + ".exe");
+        using (var wc = Client()) wc.DownloadFile(r.ExeUrl, newExe);
+        if (new FileInfo(newExe).Length < 10 * 1024) throw new Exception("File tải về không hợp lệ.");
+
+        string installed = Path.Combine(Cleaner.DataDir, "PCMasterClean.exe");   // bản dùng cho lịch tự động
+        Func<string, string> q = s => "'" + s.Replace("'", "''") + "'";
+        string script =
+            "$p=" + Process.GetCurrentProcess().Id + "; while(Get-Process -Id $p -ErrorAction SilentlyContinue){Start-Sleep -Milliseconds 300};" +
+            "Copy-Item -LiteralPath " + q(newExe) + " -Destination " + q(target) + " -Force;" +
+            "if((Test-Path -LiteralPath " + q(installed) + ") -and (" + q(installed) + " -ne " + q(target) + ")){Copy-Item -LiteralPath " + q(newExe) + " -Destination " + q(installed) + " -Force};" +
+            "Remove-Item -LiteralPath " + q(newExe) + ";" +
+            "Start-Process -FilePath " + q(target);
+        string encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
+        Process.Start(new ProcessStartInfo("powershell.exe", "-NoProfile -WindowStyle Hidden -EncodedCommand " + encoded)
+            { CreateNoWindow = true, UseShellExecute = false });
+    }
+}
 
 class CleanItem
 {
@@ -542,6 +594,7 @@ class MainForm : Form
     List<Finding> findings = new List<Finding>();
     readonly ListView stale = new ListView();
     readonly Button btnStaleOpen = new Button(), btnStaleRecycle = new Button();
+    readonly Button btnUpdate = new Button();
     readonly List<CleanItem> items = Cleaner.AllItems();
     readonly Settings settings = Settings.Load();
     readonly ListView list = new ListView();
@@ -692,7 +745,13 @@ class MainForm : Form
         lblLast.Font = new Font("Segoe UI", 8.5f);
 
         grp.Controls.AddRange(new Control[] { chkAuto, lblFreq, cboFreq, lblTime, dtTime, chkRecycle, chkNotify, btnSave, btnLog, lblLast });
-        Controls.AddRange(new Control[] { title, lblDisk, btnScan, lblStatus, tabs, grp });
+        var lblVer = new Label { Text = "Phiên bản " + Updater.Current.ToString(3), AutoSize = true, ForeColor = Color.DimGray,
+            Font = new Font("Segoe UI", 8.5f), Location = new Point(470, 22) };
+        btnUpdate.Text = "Kiểm tra cập nhật";
+        btnUpdate.SetBounds(584, 14, 160, 32);
+        btnUpdate.Click += async (s, e) => await CheckUpdate(true);
+        Controls.AddRange(new Control[] { title, lblVer, btnUpdate, lblDisk, btnScan, lblStatus, tabs, grp });
+        Shown += async (s, e) => await CheckUpdate(false);
         UpdateInfo();
     }
 
@@ -767,6 +826,44 @@ class MainForm : Form
             review.Items.Add(new ListViewItem(new[] { name, Cleaner.Fmt(f.Size), f.Date.ToString("dd/MM/yyyy"), f.Reason }) { Tag = f, ToolTipText = f.Path });
         }
         review.ShowItemToolTips = true;
+    }
+
+    // manual = người dùng bấm nút; còn khi mở app thì chỉ kiểm tra lặng lẽ và đổi chữ trên nút nếu có bản mới
+    async Task CheckUpdate(bool manual)
+    {
+        Updater.Release r;
+        try { btnUpdate.Enabled = false; r = await Task.Run(() => Updater.Latest()); }
+        catch (Exception ex)
+        {
+            if (manual) MessageBox.Show("Không kiểm tra được cập nhật (cần kết nối Internet).\n" + ex.Message, Text);
+            return;
+        }
+        finally { btnUpdate.Enabled = true; }
+
+        if (r == null || r.Version <= Updater.Current)
+        {
+            if (manual) MessageBox.Show("Bạn đang dùng phiên bản mới nhất (" + Updater.Current.ToString(3) + ").", Text);
+            return;
+        }
+        btnUpdate.Text = "Cập nhật lên " + r.Tag;
+        btnUpdate.BackColor = Color.FromArgb(255, 193, 7);
+        if (!manual) return;
+
+        string notes = string.IsNullOrWhiteSpace(r.Notes) ? "" : "\n\nCó gì mới:\n" + (r.Notes.Length > 600 ? r.Notes.Substring(0, 600) + "..." : r.Notes);
+        if (MessageBox.Show("Đã có phiên bản " + r.Tag + " (bạn đang dùng " + Updater.Current.ToString(3) + ")." + notes +
+            "\n\nCập nhật ngay? App sẽ tự đóng và mở lại.", Text, MessageBoxButtons.YesNo, MessageBoxIcon.Information) != DialogResult.Yes) return;
+        try
+        {
+            SetBusy(true, "Đang tải bản " + r.Tag + "...");
+            btnUpdate.Enabled = false;
+            await Task.Run(() => Updater.DownloadAndRestart(r));
+            Application.Exit();
+        }
+        catch (Exception ex)
+        {
+            SetBusy(false, "Cập nhật thất bại: " + ex.Message);
+            btnUpdate.Enabled = true;
+        }
     }
 
     void OpenStale()
