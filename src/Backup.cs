@@ -364,9 +364,40 @@ static class Backup
         return s;   // đường dẫn thư mục / dạng khác: để git tự xử lý
     }
 
+    // ---------- Chặn sao lưu nhầm chỗ ----------
+    // Bộ não chứa đường dẫn, tên dự án và ghi nhớ riêng: chỉ được đẩy lên repo RIÊNG TƯ dành riêng cho sao lưu.
+    static readonly string[] BackupFiles = { "README.md", ".gitattributes", ".gitignore", "settings.ini", "tri-nho.md", "tri-nho.json", "bo-nao.sbak", "khoa.enc" };
+
+    static string OwnerRepo(string url)
+    {
+        var m = System.Text.RegularExpressions.Regex.Match(url ?? "", @"github\.com[/:]([\w.-]+)/([\w.-]+?)(?:\.git)?/?$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        return m.Success ? m.Groups[1].Value + "/" + m.Groups[2].Value : null;
+    }
+
+    /// <summary>Ném lỗi nếu repo công khai, hoặc thư mục đã clone chứa thứ không phải bản sao lưu (vd. mã nguồn một dự án).</summary>
+    static void EnsureSafeTarget(string url, string dir)
+    {
+        var or = OwnerRepo(url);
+        if (or != null && HasGh)
+        {
+            var v = Gh("repo view " + or + " --json visibility --jq .visibility", 30000);
+            if (v.Item1 == 0 && v.Item2.Trim().Equals("PUBLIC", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException(L.T("Refused: ", "Từ chối: ") + or + L.T(" is a PUBLIC repo – anyone could read your memories. Use a new private repo.", " là repo CÔNG KHAI – ai cũng đọc được trí nhớ của bạn. Hãy dùng một repo riêng tư mới."));
+        }
+        if (dir != null && Directory.Exists(dir))
+        {
+            var foreign = Directory.GetFileSystemEntries(dir).Select(Path.GetFileName)
+                .Where(n => n != ".git" && !BackupFiles.Contains(n, StringComparer.OrdinalIgnoreCase)).Take(5).ToList();
+            if (foreign.Count > 0)
+                throw new InvalidOperationException(L.T("Refused: this repo already holds other content (", "Từ chối: repo này đang chứa nội dung khác (") + string.Join(", ", foreign) +
+                    L.T("…). Back up only to an empty repo made for the brain, so nothing in it is overwritten.", "…). Chỉ sao lưu vào một repo trống dành riêng cho bộ não, để không ghi đè thứ gì trong đó."));
+        }
+    }
+
     public static string Setup(string repoUrl, string password)
     {
         repoUrl = ResolveRepo(repoUrl);
+        EnsureSafeTarget(repoUrl, null);
         bool plain = string.IsNullOrEmpty(password);
         if (!plain && password.Length < 8) throw new ArgumentException(L.T("The password needs at least 8 characters.", "Mật khẩu cần ít nhất 8 ký tự."));
         if (!GitAvailable()) throw new InvalidOperationException(L.T("Git is not installed (git-scm.com).", "Máy chưa cài Git (git-scm.com)."));
@@ -375,6 +406,7 @@ static class Backup
             if (Directory.Exists(RepoDir)) DeleteTree(RepoDir);
             var r = Git("clone \"" + repoUrl + "\" \"" + RepoDir + "\"", Cleaner.DataDir);
             if (r.Item1 != 0) throw new InvalidOperationException(L.T("Could not fetch the repo: ", "Không lấy được repo: ") + r.Item2);
+            try { EnsureSafeTarget(repoUrl, RepoDir); } catch { DeleteTree(RepoDir); throw; }
             if (File.Exists(Path.Combine(RepoDir, KeyName)) || File.Exists(Path.Combine(RepoDir, DataName)) || File.Exists(Path.Combine(RepoDir, PlainName)))
                 throw new InvalidOperationException(L.T("This repo already has a backup. Use \"Restore\" instead of setting up again.", "Repo này đã có bản sao lưu. Hãy dùng \"Khôi phục\" thay vì thiết lập mới."));
             if (plain)
@@ -409,6 +441,8 @@ static class Backup
             var st = Status();
             try
             {
+                // Kiểm tra lại trước MỖI lần đẩy: repo bị đổi sang công khai, hoặc thiết lập nhầm từ bản cũ, thì dừng hẳn
+                EnsureSafeTarget(st.Repo, RepoDir);
                 string hash;
                 var packed = Pack(out hash);
                 if (!force && hash == st.LastHash && string.IsNullOrEmpty(st.LastError)) return L.T("Nothing new.", "Không có gì mới.");
