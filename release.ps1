@@ -34,6 +34,9 @@ if ($BuildOnly) { Write-Host "Đã đóng gói: $zip"; return }
 
 $tag = "v$Version"
 if (-not $Title) { $Title = $tag } else { $Title = "$tag – $Title" }
-gh release create $tag $zip -R $repo --title $Title --notes $Notes
+# Ghi chú qua file: PowerShell 5.1 làm hỏng dấu " khi truyền chuỗi cho gh
+$notesFile = Join-Path $out "notes.md"
+[IO.File]::WriteAllText($notesFile, $Notes, (New-Object Text.UTF8Encoding $false))
+gh release create $tag $zip -R $repo --title $Title --notes-file $notesFile
 if ($LASTEXITCODE -ne 0) { throw "Tạo release lỗi." }
 Write-Host "Đã phát hành ${tag}: $zip"
