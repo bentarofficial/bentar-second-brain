@@ -2,6 +2,18 @@
 
 A Windows app that gives your PC and every AI agent on it one shared, local **second brain** (file search + long-term memory over MCP), together with safe PC cleanup and private GitHub backup.
 
+<p align="center">
+  <a href="https://github.com/bentarofficial/bentar-second-brain/releases/latest"><img alt="Download for Windows" src="https://img.shields.io/badge/Download-Windows%20(.zip)-2ea44f?style=for-the-badge&logo=windows&logoColor=white"></a>
+  <br>
+  <a href="https://github.com/bentarofficial/bentar-second-brain/releases/latest"><img alt="Latest version" src="https://img.shields.io/github/v/release/bentarofficial/bentar-second-brain?label=latest"></a>
+</p>
+
+## Download and install
+
+1. Click **Download** above, then on the release page click **`Bentar-Second-Brain-vX.Y.Z.zip`** under *Assets*.
+2. Extract the zip and run **`Bentar Second Brain.exe`** (Windows 10/11, no admin rights needed). If Windows SmartScreen appears, click *More info* → *Run anyway*.
+3. Updates are automatic: when a new version is released, the app offers it on startup (or click **Check for updates**).
+
 ## PC cleanup
 
 The app scans your drives and sorts the results into 4 groups:
