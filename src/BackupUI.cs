@@ -183,7 +183,7 @@ static class BackupUI
         };
         d.Body.Controls.Add(Card(L.T("Create a new private repo", "Tạo repo riêng tư mới"), L.T("The app creates it on your GitHub account.", "App tự tạo repo trên tài khoản GitHub của bạn."), 1,
             () => useNew, () => { useNew = true; sync(); txtName.Focus(); }, nameBox));
-        d.Body.Controls.Add(Card(L.T("Use an existing repo", "Dùng repo có sẵn"), L.T("Paste the address of a repo you already own.", "Dán địa chỉ một repo bạn đã có."), 1,
+        d.Body.Controls.Add(Card(L.T("Use an existing repo", "Dùng repo có sẵn"), L.T("Its name (e.g. my-backup) or full address.", "Tên repo (vd. my-backup) hoặc địa chỉ đầy đủ."), 1,
             () => !useNew, () => { useNew = false; sync(); txtUrl.Focus(); }, urlBox));
         d.Body.Controls.Add(Card(L.T("Also encrypt with a password (optional)", "Mã hoá thêm bằng mật khẩu (không bắt buộc)"),
             L.T("Without it, anyone who gets into your GitHub account can read your memories. With it, restoring also needs the password – you get a recovery code in case you forget.",

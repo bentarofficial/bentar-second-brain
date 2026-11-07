@@ -347,8 +347,26 @@ static class Backup
 
     // ---------- Thiết lập lần đầu ----------
     // Trả về MÃ KHÔI PHỤC (chỉ hiện một lần cho người dùng chép lại)
+    /// <summary>Người dùng có thể nhập tên repo ("ten-repo"), "chu/ten-repo", "github.com/chu/ten-repo" hoặc địa chỉ đầy đủ.</summary>
+    public static string ResolveRepo(string input)
+    {
+        var s = (input ?? "").Trim().TrimEnd('/');
+        if (s.Length == 0) throw new ArgumentException(L.T("Enter the repo name or address.", "Hãy nhập tên hoặc địa chỉ repo."));
+        if (s.Contains("://") || s.StartsWith("git@")) return s;
+        if (s.StartsWith("github.com/", StringComparison.OrdinalIgnoreCase)) return "https://" + s + (s.EndsWith(".git") ? "" : ".git");
+        if (System.Text.RegularExpressions.Regex.IsMatch(s, @"^[\w.-]+/[\w.-]+$")) return "https://github.com/" + s + (s.EndsWith(".git") ? "" : ".git");
+        if (System.Text.RegularExpressions.Regex.IsMatch(s, @"^[\w.-]+$"))
+        {
+            var user = HasGh ? GhUser() : null;
+            if (user == null) throw new ArgumentException(L.T("Sign in to GitHub first, or paste the full address (https://github.com/<you>/", "Hãy đăng nhập GitHub trước, hoặc dán địa chỉ đầy đủ (https://github.com/<tên-bạn>/") + s + ").");
+            return "https://github.com/" + user + "/" + s + (s.EndsWith(".git") ? "" : ".git");
+        }
+        return s;   // đường dẫn thư mục / dạng khác: để git tự xử lý
+    }
+
     public static string Setup(string repoUrl, string password)
     {
+        repoUrl = ResolveRepo(repoUrl);
         bool plain = string.IsNullOrEmpty(password);
         if (!plain && password.Length < 8) throw new ArgumentException(L.T("The password needs at least 8 characters.", "Mật khẩu cần ít nhất 8 ký tự."));
         if (!GitAvailable()) throw new InvalidOperationException(L.T("Git is not installed (git-scm.com).", "Máy chưa cài Git (git-scm.com)."));
@@ -485,6 +503,7 @@ static class Backup
     // secret: mật khẩu HOẶC mã khôi phục
     public static string Restore(string repoUrl, string secret)
     {
+        repoUrl = ResolveRepo(repoUrl);
         if (!GitAvailable()) throw new InvalidOperationException(L.T("Git is not installed (git-scm.com).", "Máy chưa cài Git (git-scm.com)."));
         lock (gate)
         {
