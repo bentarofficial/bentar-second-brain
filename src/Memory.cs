@@ -61,8 +61,8 @@ static class Memory
     {
         switch (k)
         {
-            case "ghi-chu": return "ghi chú"; case "quyet-dinh": return "quyết định"; case "bai-hoc": return "bài học";
-            case "su-that": return "sự thật"; case "viec-can-lam": return "việc cần làm"; case "du-an": return "dự án"; case "file": return "file";
+            case "ghi-chu": return L.T("note", "ghi chú"); case "quyet-dinh": return L.T("decision", "quyết định"); case "bai-hoc": return L.T("lesson", "bài học");
+            case "su-that": return L.T("fact", "sự thật"); case "viec-can-lam": return L.T("to-do", "việc cần làm"); case "du-an": return L.T("project", "dự án"); case "file": return "file";
             default: return k;
         }
     }
@@ -110,7 +110,7 @@ static class Memory
     // Thay toàn bộ trí nhớ bằng bản khôi phục (giữ khoá để agent khác không ghi chen vào giữa)
     public static void ReplaceAll(string json)
     {
-        if (Json.Deserialize<MemoryStore>(json) == null) throw new InvalidDataException("Bản trí nhớ không hợp lệ.");
+        if (Json.Deserialize<MemoryStore>(json) == null) throw new InvalidDataException(L.T("Invalid memory file.", "Bản trí nhớ không hợp lệ."));
         With(false, s =>
         {
             Directory.CreateDirectory(Cleaner.DataDir);
@@ -214,7 +214,7 @@ static class Memory
     // ---------- Ghi nhớ ----------
     public static string Remember(string text, string title, string kind, string source, string tags)
     {
-        if (string.IsNullOrWhiteSpace(text)) throw new ArgumentException("Cần nội dung để ghi nhớ.");
+        if (string.IsNullOrWhiteSpace(text)) throw new ArgumentException(L.T("Text is required to remember.", "Cần nội dung để ghi nhớ."));
         string k; if (kind == null || !KindNames.TryGetValue(kind, out k)) k = "ghi-chu";
         if (string.IsNullOrWhiteSpace(title)) { title = text.Trim().Split('\n')[0]; if (title.Length > 80) title = title.Substring(0, 80) + "…"; }
         return With(true, s =>
@@ -232,7 +232,7 @@ static class Memory
                 var n = dup.n;
                 if (n.Text != text) { n.History.Add(n.Updated.ToString("yyyy-MM-dd") + ": " + n.Text); n.Text = text; n.Title = title; }
                 n.Updated = n.LastUsed = now; n.Uses++; n.Outdated = false;
-                return "Đã có ghi nhớ gần giống #" + n.Id + " — đã củng cố và cập nhật nội dung mới.";
+                return L.T("A similar memory already exists #", "Đã có ghi nhớ gần giống #") + n.Id + L.T(" — reinforced it and updated the content.", " — đã củng cố và cập nhật nội dung mới.");
             }
             var neuron = new Neuron { Id = "n" + (++s.NextId), Kind = k, Title = title, Text = text, Source = source, Tags = tags, Agent = AgentName,
                 Created = now, Updated = now, LastUsed = now, History = new List<string>() };
@@ -256,8 +256,8 @@ static class Memory
                 Fire(s, neuron.Id, x.n.Id, Math.Round(x.sim * 2, 2), "nội dung gần nhau");
                 links.Add("#" + x.n.Id + " " + x.n.Title);
             }
-            return "Đã ghi nhớ #" + neuron.Id + " (" + KindLabel(k) + "): " + title +
-                   (links.Count > 0 ? "\nĐã nối với: " + string.Join(", ", links.Distinct().Take(8)) : "");
+            return L.T("Remembered #", "Đã ghi nhớ #") + neuron.Id + " (" + KindLabel(k) + "): " + title +
+                   (links.Count > 0 ? L.T("\nLinked to: ", "\nĐã nối với: ") + string.Join(", ", links.Distinct().Take(8)) : "");
         });
     }
 
@@ -266,11 +266,11 @@ static class Memory
         return With(true, s =>
         {
             var n = Find(s, (id ?? "").Trim().TrimStart('#'));
-            if (n == null) throw new ArgumentException("Không có ghi nhớ " + id);
+            if (n == null) throw new ArgumentException(L.T("No memory ", "Không có ghi nhớ ") + id);
             if (!string.IsNullOrWhiteSpace(text) && text != n.Text) { n.History.Add(n.Updated.ToString("yyyy-MM-dd") + ": " + n.Text); n.Text = text; }
             n.Outdated = outdated;
             n.Updated = n.LastUsed = DateTime.UtcNow;
-            return "Đã cập nhật #" + n.Id + (outdated ? " (đánh dấu đã cũ – sẽ mờ dần, vẫn giữ lại)" : "") + ".";
+            return L.T("Updated #", "Đã cập nhật #") + n.Id + (outdated ? L.T(" (marked outdated – will fade but is kept)", " (đánh dấu đã cũ – sẽ mờ dần, vẫn giữ lại)") : "") + ".";
         });
     }
 
@@ -279,9 +279,9 @@ static class Memory
         return With(true, s =>
         {
             var ia = Resolve(s, a); var ib = Resolve(s, b);
-            if (ia == null || ib == null) throw new ArgumentException("Không tìm thấy " + (ia == null ? a : b) + " (dùng mã ghi nhớ như #n12, hoặc đường dẫn file/dự án).");
+            if (ia == null || ib == null) throw new ArgumentException(L.T("Not found: ", "Không tìm thấy ") + (ia == null ? a : b) + L.T(" (use a memory id like #n12, or a file/project path).", " (dùng mã ghi nhớ như #n12, hoặc đường dẫn file/dự án)."));
             Fire(s, ia, ib, 1, string.IsNullOrWhiteSpace(why) ? "agent nối" : why);
-            return "Đã nối " + Find(s, ia).Title + " ↔ " + Find(s, ib).Title + ".";
+            return L.T("Linked ", "Đã nối ") + Find(s, ia).Title + " ↔ " + Find(s, ib).Title + ".";
         });
     }
 
@@ -349,11 +349,11 @@ static class Memory
             var n = r.N;
             sb.Append("• #").Append(n.Id).Append(" [").Append(KindLabel(n.Kind));
             if (n.Kind != "file" && n.Kind != "du-an") sb.Append(" · ").Append(n.Updated.ToLocalTime().ToString("dd/MM/yyyy"));
-            if (n.Uses > 0) sb.Append(" · nhớ lại ").Append(n.Uses).Append(" lần");
-            if (n.Outdated) sb.Append(" · ĐÃ CŨ");
+            if (n.Uses > 0) sb.Append(L.T(" · recalled ", " · nhớ lại ")).Append(n.Uses).Append(L.T(" times", " lần"));
+            if (n.Outdated) sb.Append(L.T(" · OUTDATED", " · ĐÃ CŨ"));
             sb.Append("] ").AppendLine(n.Title);
-            if (r.Via != null) sb.AppendLine("  (liên tưởng từ " + r.Via + ")");
-            if (!string.IsNullOrEmpty(n.Source)) sb.AppendLine("  Nguồn: " + n.Source);
+            if (r.Via != null) sb.AppendLine(L.T("  (associated via ", "  (liên tưởng từ ") + r.Via + ")");
+            if (!string.IsNullOrEmpty(n.Source)) sb.AppendLine(L.T("  Source: ", "  Nguồn: ") + n.Source);
             if (!string.IsNullOrEmpty(n.Text) && n.Kind != "file")
             {
                 var t = n.Text.Trim();
@@ -378,11 +378,11 @@ static class Memory
             var related = s.Synapses.Where(y => (y.A == pid || y.B == pid)).Select(y => new { other = Find(s, y.A == pid ? y.B : y.A), w = EffectiveWeight(y), y.Why })
                            .Where(x => x.other != null && x.other.Kind == "du-an").OrderByDescending(x => x.w).Take(8).ToList();
             var sb = new StringBuilder();
-            if (list.Count > 0) sb.AppendLine("Ghi nhớ về dự án này:").AppendLine(Format(list, false));
+            if (list.Count > 0) sb.AppendLine(L.T("Memories about this project:", "Ghi nhớ về dự án này:")).AppendLine(Format(list, false));
             if (related.Count > 0)
             {
-                sb.AppendLine().AppendLine("Dự án hay đi cùng:");
-                foreach (var x in related) sb.AppendLine("  • " + x.other.Title + " — " + x.other.Source + "  (độ gắn kết " + x.w.ToString("0.00") + ": " + x.Why + ")");
+                sb.AppendLine().AppendLine(L.T("Projects often used together:", "Dự án hay đi cùng:"));
+                foreach (var x in related) sb.AppendLine("  • " + x.other.Title + " — " + x.other.Source + L.T("  (strength ", "  (độ gắn kết ") + x.w.ToString("0.00") + ": " + x.Why + ")");
             }
             return sb.ToString().TrimEnd();
         });

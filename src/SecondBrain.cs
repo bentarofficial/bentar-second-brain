@@ -114,7 +114,7 @@ static class Brain
         using (var sr = new StreamReader(fs, Encoding.UTF8, true))
         {
             var text = sr.ReadToEnd();
-            if (text.IndexOf('\0') >= 0) throw new InvalidDataException("File nhị phân, không phải văn bản.");
+            if (text.IndexOf('\0') >= 0) throw new InvalidDataException(L.T("Binary file, not text.", "File nhị phân, không phải văn bản."));
             return text;
         }
     }
@@ -266,7 +266,7 @@ static class Brain
                 if (!online.Contains(Path.GetPathRoot(p.Path))) pl.Add(p);
 
             var now = DateTime.Now;
-            Progress = "Đang lưu chỉ mục...";
+            Progress = L.T("Saving index...", "Đang lưu chỉ mục...");
             Save(now, fl, pl, newTerms);
             Install(fl, pl, newTerms);
             BuiltAt = now;
@@ -292,7 +292,7 @@ static class Brain
                              .Select(e => e.Name).ToList();
         if (markers.Count > 0 && depth > 0) pl.Add(MakeProject(dir, entries, markers));
 
-        Progress = "Đang lập chỉ mục: " + dir.FullName;
+        Progress = L.T("Indexing: ", "Đang lập chỉ mục: ") + dir.FullName;
         var dirTokens = Tokens(dir.Name).ToList();
         foreach (var e in entries)
         {
@@ -462,12 +462,12 @@ static class Brain
         source = Path.GetFullPath(source);
         destination = Path.GetFullPath(destination);
         bool isDir = Directory.Exists(source);
-        if (!isDir && !File.Exists(source)) throw new FileNotFoundException("Không tìm thấy: " + source);
+        if (!isDir && !File.Exists(source)) throw new FileNotFoundException(L.T("Not found: ", "Không tìm thấy: ") + source);
         if (Directory.Exists(destination)) destination = Path.Combine(destination, Path.GetFileName(source.TrimEnd('\\')));
         if (File.Exists(destination) || Directory.Exists(destination))
-            throw new IOException("Đích đã tồn tại, Second Brain không ghi đè: " + destination);
+            throw new IOException(L.T("Destination exists; Second Brain does not overwrite: ", "Đích đã tồn tại, Second Brain không ghi đè: ") + destination);
         if (isDir && (destination + "\\").StartsWith(source.TrimEnd('\\') + "\\", StringComparison.OrdinalIgnoreCase))
-            throw new IOException("Không thể chép một thư mục vào bên trong chính nó.");
+            throw new IOException(L.T("Cannot copy a folder into itself.", "Không thể chép một thư mục vào bên trong chính nó."));
 
         int n = 0; long bytes = 0;
         if (isDir)
@@ -487,7 +487,7 @@ static class Brain
             File.Copy(source, destination, false); n = 1; bytes = new FileInfo(source).Length;
         }
         Cleaner.Log("[Second Brain] Agent sao chép " + source + " -> " + destination + " (" + n + " file, " + Cleaner.Fmt(bytes) + ")");
-        return "Đã sao chép " + n + " file (" + Cleaner.Fmt(bytes) + ") tới " + destination;
+        return L.T("Copied ", "Đã sao chép ") + n + " file (" + Cleaner.Fmt(bytes) + L.T(") to ", ") tới ") + destination;
     }
 }
 
@@ -524,7 +524,7 @@ static class AgentLinks
             var f = t.Item2;
             // Claude Desktop đang mở sẽ ghi đè file cấu hình của nó và làm mất mục vừa thêm
             if (desktopOpen && t.Item1.StartsWith("Claude Desktop") && Directory.Exists(Path.GetDirectoryName(f)))
-            { if (!onlyExisting) r.Add(t.Item1 + ": đang mở – thoát hẳn Claude Desktop (cả biểu tượng ở khay hệ thống) rồi bấm kết nối lại"); continue; }
+            { if (!onlyExisting) r.Add(t.Item1 + L.T(": running – fully quit Claude Desktop (including the tray icon) and connect again", ": đang mở – thoát hẳn Claude Desktop (cả biểu tượng ở khay hệ thống) rồi bấm kết nối lại")); continue; }
             r.Add(Try(t.Item1, () => JsonConnect(f, onlyExisting)));
         }
         r.Add(Try("Codex", () => CodexConnect(onlyExisting)));
@@ -535,7 +535,7 @@ static class AgentLinks
     public static List<string> DisconnectAll()
     {
         var r = new List<string>();
-        r.Add(Try("Claude Code", () => Cmd("where claude").Item1 == 0 && Cmd("claude mcp remove --scope user " + ServerName).Item1 == 0 ? "đã ngắt" : null));
+        r.Add(Try("Claude Code", () => Cmd("where claude").Item1 == 0 && Cmd("claude mcp remove --scope user " + ServerName).Item1 == 0 ? L.T("disconnected", "đã ngắt") : null));
         foreach (var t in JsonTargets()) { var f = t.Item2; r.Add(Try(t.Item1, () => JsonDisconnect(f))); }
         r.Add(Try("Codex", () =>
         {
@@ -544,9 +544,59 @@ static class AgentLinks
             var updated = CodexBlock.Replace(text, "");
             if (updated == text) return null;
             Write(CodexFile, updated.TrimEnd('\n') + "\n");
-            return "đã ngắt";
+            return L.T("disconnected", "đã ngắt");
         }));
         return r.Where(x => x != null).ToList();
+    }
+
+    // ---------- Từng agent riêng lẻ (cho trang Cài đặt) ----------
+    public class Agent { public string Name; public bool Installed, Connected; }
+
+    public static List<Agent> List()
+    {
+        var r = new List<Agent>();
+        bool cc = Cmd("where claude").Item1 == 0;
+        r.Add(new Agent { Name = "Claude Code", Installed = cc, Connected = cc && Cmd("claude mcp get " + ServerName).Item1 == 0 });
+        foreach (var t in JsonTargets())
+        {
+            bool inst = Directory.Exists(Path.GetDirectoryName(t.Item2));
+            bool conn = false;
+            try { conn = File.Exists(t.Item2) && JsonEntry.IsMatch(File.ReadAllText(t.Item2, Encoding.UTF8)); } catch { }
+            if (r.Any(a => a.Name == t.Item1)) continue;
+            r.Add(new Agent { Name = t.Item1, Installed = inst, Connected = conn });
+        }
+        bool cx = Directory.Exists(Path.GetDirectoryName(CodexFile)), cxc = false;
+        try { cxc = File.Exists(CodexFile) && CodexBlock.IsMatch(File.ReadAllText(CodexFile, Encoding.UTF8)); } catch { }
+        r.Add(new Agent { Name = "Codex", Installed = cx, Connected = cxc });
+        return r;
+    }
+
+    public static string Connect(string name)
+    {
+        if (name == "Claude Code") return ClaudeCode(false);
+        if (name == "Codex") return CodexConnect(false);
+        if (name.StartsWith("Claude Desktop") && ClaudeDesktopRunning())
+            return L.T("Fully quit Claude Desktop (including the tray icon) and try again.", "Hãy thoát hẳn Claude Desktop (cả biểu tượng ở khay hệ thống) rồi thử lại.");
+        foreach (var t in JsonTargets()) if (t.Item1 == name) return JsonConnect(t.Item2, false);
+        return null;
+    }
+
+    public static string Disconnect(string name)
+    {
+        if (name == "Claude Code") return Cmd("claude mcp remove --scope user " + ServerName).Item1 == 0 ? L.T("disconnected", "đã ngắt") : null;
+        if (name == "Codex")
+        {
+            if (!File.Exists(CodexFile)) return null;
+            var text = File.ReadAllText(CodexFile, Encoding.UTF8);
+            var updated = CodexBlock.Replace(text, "");
+            if (updated == text) return null;
+            Write(CodexFile, updated.TrimEnd('\n') + "\n");
+            return L.T("disconnected", "đã ngắt");
+        }
+        if (name.StartsWith("Claude Desktop") && ClaudeDesktopRunning())
+            return L.T("Fully quit Claude Desktop (including the tray icon) and try again.", "Hãy thoát hẳn Claude Desktop (cả biểu tượng ở khay hệ thống) rồi thử lại.");
+        foreach (var t in JsonTargets()) if (t.Item1 == name) return JsonDisconnect(t.Item2);
+        return null;
     }
 
     static bool ClaudeDesktopRunning()
@@ -564,7 +614,7 @@ static class AgentLinks
     static string Try(string agent, Func<string> f)
     {
         try { var s = f(); return s == null ? null : agent + ": " + s; }
-        catch (Exception ex) { return agent + ": lỗi – " + ex.Message; }
+        catch (Exception ex) { return agent + L.T(": error – ", ": lỗi – ") + ex.Message; }
     }
 
     static Tuple<int, string> Cmd(string c)
@@ -585,13 +635,13 @@ static class AgentLinks
         var get = Cmd("claude mcp get " + ServerName);
         if (get.Item1 == 0)
         {
-            if (get.Item2.IndexOf(Exe, StringComparison.OrdinalIgnoreCase) >= 0) return "đã kết nối";
+            if (get.Item2.IndexOf(Exe, StringComparison.OrdinalIgnoreCase) >= 0) return L.T("connected", "đã kết nối");
             Cmd("claude mcp remove --scope user " + ServerName);
         }
         else if (onlyExisting) return null;
         var r = Cmd("claude mcp add --scope user " + ServerName + " -- \"" + Exe + "\" /mcp");
         if (r.Item1 != 0) throw new Exception(r.Item2.Trim());
-        return "đã kết nối (mọi dự án)";
+        return L.T("connected (all projects)", "đã kết nối (mọi dự án)");
     }
 
     static readonly Regex JsonEntry = new Regex("\"" + ServerName + "\"\\s*:\\s*\\{[^{}]*\\}");
@@ -615,7 +665,7 @@ static class AgentLinks
         string updated;
         if (m.Success)
         {
-            if (m.Value.Contains(Exe.Replace("\\", "\\\\"))) return "đã kết nối";
+            if (m.Value.Contains(Exe.Replace("\\", "\\\\"))) return L.T("connected", "đã kết nối");
             updated = text.Substring(0, m.Index) + entry + text.Substring(m.Index + m.Length);
         }
         else if (onlyExisting) return null;
@@ -631,13 +681,13 @@ static class AgentLinks
             else
             {
                 int at = text.IndexOf('{');
-                if (at < 0) throw new InvalidDataException("File cấu hình không hợp lệ: " + file);
+                if (at < 0) throw new InvalidDataException(L.T("Invalid config file: ", "File cấu hình không hợp lệ: ") + file);
                 updated = text.Insert(at + 1, "\n  \"mcpServers\": {\n    " + entry + "\n  }" + (Regex.IsMatch(text.Substring(at + 1), "^\\s*\\}") ? "\n" : ","));
             }
         }
         CheckJson(updated);   // chỉ ghi khi JSON vẫn hợp lệ
         Write(file, updated);
-        return "đã kết nối (khởi động lại app để nhận)";
+        return L.T("connected (restart the app to pick it up)", "đã kết nối (khởi động lại app để nhận)");
     }
 
     static string JsonDisconnect(string file)
@@ -658,7 +708,7 @@ static class AgentLinks
         string updated = text.Substring(0, start) + text.Substring(end);
         CheckJson(updated);
         Write(file, updated);
-        return "đã ngắt";
+        return L.T("disconnected", "đã ngắt");
     }
 
     static string CodexConnect(bool onlyExisting)
@@ -669,13 +719,13 @@ static class AgentLinks
         var m = CodexBlock.Match(text);
         if (m.Success)
         {
-            if (m.Value.Contains("'" + Exe + "'")) return "đã kết nối";
+            if (m.Value.Contains("'" + Exe + "'")) return L.T("connected", "đã kết nối");
             Write(CodexFile, (text.Substring(0, m.Index) + block + text.Substring(m.Index + m.Length)).TrimStart('\n'));
-            return "đã kết nối";
+            return L.T("connected", "đã kết nối");
         }
         if (onlyExisting) return null;
         Write(CodexFile, (text.TrimEnd('\n') + block).TrimStart('\n'));
-        return "đã kết nối";
+        return L.T("connected", "đã kết nối");
     }
 }
 
@@ -686,13 +736,19 @@ static class McpServer
     static StreamWriter output;
     static readonly object writeGate = new object();
 
-    const string Instructions =
+    static string Instructions { get { return L.T(
+        "Bentar Second Brain is the shared memory of this whole computer: every hard drive, USB stick and memory card, including documents, notes and source code of ALL projects. " +
+        "When the user mentions documents, research, notes, code or another project outside the current working folder, use search or list_projects to find it yourself instead of asking for a path. " +
+        "Search ignores Vietnamese accents. Second Brain is read-only and never edits or deletes files; to use a document in the current project, use copy. " +
+        "Second Brain is also the LONG-TERM MEMORY shared by all agents: at the start of each task, call recall to see what earlier agents learned about this topic/project; " +
+        "when you learn something worth keeping (decisions and why, lessons after fixing a bug, facts about the project, unfinished work), call remember with its source. " +
+        "If old information is wrong, use revise_memory instead of creating a new memory. Do not store trivia or secrets (passwords, API keys).",
         "Bentar Second Brain là bộ nhớ chung của cả máy tính này: mọi ổ cứng, USB và thẻ nhớ, gồm tài liệu, ghi chú và mã nguồn của TẤT CẢ dự án. " +
         "Khi người dùng nhắc tới tài liệu, nghiên cứu, ghi chú, đoạn code hay một dự án khác ngoài thư mục đang làm việc, hãy dùng search hoặc list_projects để tự tìm thay vì hỏi người dùng đường dẫn. " +
         "Tìm kiếm không phân biệt dấu tiếng Việt. Second Brain chỉ đọc, không sửa hay xoá file; muốn dùng tài liệu trong dự án hiện tại thì dùng copy để chép sang. " +
         "Second Brain còn là TRÍ NHỚ DÀI HẠN dùng chung cho mọi agent: đầu mỗi việc, gọi recall để xem agent trước đã biết gì về chủ đề/dự án này; " +
         "khi học được điều đáng giữ (quyết định và lý do, bài học sau khi sửa lỗi, sự thật về dự án, việc còn dang dở), gọi remember để lưu lại kèm nguồn. " +
-        "Thông tin cũ sai thì dùng revise_memory thay vì tạo ghi nhớ mới. Đừng lưu chuyện vặt hay bí mật (mật khẩu, khoá API).";
+        "Thông tin cũ sai thì dùng revise_memory thay vì tạo ghi nhớ mới. Đừng lưu chuyện vặt hay bí mật (mật khẩu, khoá API)."); } }
 
     public static void Run()
     {
@@ -786,8 +842,8 @@ static class McpServer
         isError = false;
         string text;
         try { text = CallTool(name, args); }
-        catch (Exception ex) { text = "Lỗi: " + ex.Message; isError = true; }
-        Activity.Log(client, channel, name, Activity.Summary(name, args) + (isError ? " (lỗi)" : ""));
+        catch (Exception ex) { text = L.T("Error: ", "Lỗi: ") + ex.Message; isError = true; }
+        Activity.Log(client, channel, name, Activity.Summary(name, args) + (isError ? L.T(" (error)", " (lỗi)") : ""));
         return text;
     }
 
@@ -803,51 +859,51 @@ static class McpServer
     static object[] ToolList()
     {
         return new object[] {
-            Tool("search", "Tìm file trên toàn máy (mọi ổ, USB, thẻ nhớ) theo nội dung và tên file. Không phân biệt dấu tiếng Việt. Trả về đường dẫn, dự án chứa file và đoạn trích có dòng khớp.",
+            Tool("search", L.T("Search files across the whole PC (all drives, USB sticks, memory cards) by content and file name. Vietnamese accents are ignored. Returns the path, the containing project and a snippet with matching lines.", "Tìm file trên toàn máy (mọi ổ, USB, thẻ nhớ) theo nội dung và tên file. Không phân biệt dấu tiếng Việt. Trả về đường dẫn, dự án chứa file và đoạn trích có dòng khớp."),
                 new Dictionary<string, object> {
-                    { "query", Prop("string", "Từ khoá cần tìm, ví dụ: 'nghiên cứu thị trường cà phê' hoặc 'oauth refresh token'") },
-                    { "path", Prop("string", "Chỉ tìm bên trong thư mục này (tuỳ chọn), ví dụ D:\\Projects\\abc") },
-                    { "ext", Prop("string", "Chỉ tìm file có đuôi này (tuỳ chọn), ví dụ md, docx, py") },
-                    { "name_only", Prop("boolean", "true = chỉ tìm theo tên file") },
-                    { "limit", Prop("integer", "Số kết quả tối đa (mặc định 20, tối đa 100)") } }, "query"),
-            Tool("list_projects", "Liệt kê các dự án trên máy (thư mục có .git, CLAUDE.md, package.json...) kèm tóm tắt từ README/CLAUDE.md, mới dùng gần đây xếp trước.",
-                new Dictionary<string, object> { { "filter", Prop("string", "Lọc theo tên/đường dẫn/tóm tắt (tuỳ chọn)") } }),
-            Tool("project_overview", "Xem tổng quan một dự án: các file/thư mục cấp đầu và nội dung CLAUDE.md, AGENTS.md, README.",
-                new Dictionary<string, object> { { "path", Prop("string", "Đường dẫn thư mục dự án") } }, "path"),
-            Tool("read_file", "Đọc nội dung một file văn bản, mã nguồn hoặc Word (.docx) ở bất kỳ đâu trên máy. Đọc theo đoạn dòng với file dài.",
+                    { "query", Prop("string", L.T("Keywords, e.g. 'coffee market research' or 'oauth refresh token'", "Từ khoá cần tìm, ví dụ: 'nghiên cứu thị trường cà phê' hoặc 'oauth refresh token'")) },
+                    { "path", Prop("string", L.T("Only search inside this folder (optional), e.g. D:\\Projects\\abc", "Chỉ tìm bên trong thư mục này (tuỳ chọn), ví dụ D:\\Projects\\abc")) },
+                    { "ext", Prop("string", L.T("Only files with this extension (optional), e.g. md, docx, py", "Chỉ tìm file có đuôi này (tuỳ chọn), ví dụ md, docx, py")) },
+                    { "name_only", Prop("boolean", L.T("true = match file names only", "true = chỉ tìm theo tên file")) },
+                    { "limit", Prop("integer", L.T("Maximum results (default 20, max 100)", "Số kết quả tối đa (mặc định 20, tối đa 100)")) } }, "query"),
+            Tool("list_projects", L.T("List projects on this PC (folders with .git, CLAUDE.md, package.json...) with a summary from README/CLAUDE.md, most recently used first.", "Liệt kê các dự án trên máy (thư mục có .git, CLAUDE.md, package.json...) kèm tóm tắt từ README/CLAUDE.md, mới dùng gần đây xếp trước."),
+                new Dictionary<string, object> { { "filter", Prop("string", L.T("Filter by name/path/summary (optional)", "Lọc theo tên/đường dẫn/tóm tắt (tuỳ chọn)")) } }),
+            Tool("project_overview", L.T("Overview of a project: top-level files/folders and the contents of CLAUDE.md, AGENTS.md, README.", "Xem tổng quan một dự án: các file/thư mục cấp đầu và nội dung CLAUDE.md, AGENTS.md, README."),
+                new Dictionary<string, object> { { "path", Prop("string", L.T("Project folder path", "Đường dẫn thư mục dự án")) } }, "path"),
+            Tool("read_file", L.T("Read a text, source code or Word (.docx) file anywhere on the PC. Long files are read in line ranges.", "Đọc nội dung một file văn bản, mã nguồn hoặc Word (.docx) ở bất kỳ đâu trên máy. Đọc theo đoạn dòng với file dài."),
                 new Dictionary<string, object> {
-                    { "path", Prop("string", "Đường dẫn đầy đủ của file") },
-                    { "start_line", Prop("integer", "Dòng bắt đầu, tính từ 1 (mặc định 1)") },
-                    { "max_lines", Prop("integer", "Số dòng tối đa (mặc định 400)") } }, "path"),
-            Tool("list_dir", "Liệt kê nội dung một thư mục. Để trống path để xem các ổ đĩa.",
-                new Dictionary<string, object> { { "path", Prop("string", "Đường dẫn thư mục (bỏ trống = danh sách ổ đĩa)") } }),
-            Tool("copy", "Sao chép một file hoặc thư mục tới chỗ khác, ví dụ đưa tài liệu từ dự án khác vào dự án hiện tại. Không bao giờ ghi đè file đã có.",
+                    { "path", Prop("string", L.T("Full file path", "Đường dẫn đầy đủ của file")) },
+                    { "start_line", Prop("integer", L.T("Start line, 1-based (default 1)", "Dòng bắt đầu, tính từ 1 (mặc định 1)")) },
+                    { "max_lines", Prop("integer", L.T("Maximum lines (default 400)", "Số dòng tối đa (mặc định 400)")) } }, "path"),
+            Tool("list_dir", L.T("List a folder's contents. Leave path empty to list drives.", "Liệt kê nội dung một thư mục. Để trống path để xem các ổ đĩa."),
+                new Dictionary<string, object> { { "path", Prop("string", L.T("Folder path (empty = list drives)", "Đường dẫn thư mục (bỏ trống = danh sách ổ đĩa)")) } }),
+            Tool("copy", L.T("Copy a file or folder elsewhere, e.g. bring documents from another project into the current one. Never overwrites existing files.", "Sao chép một file hoặc thư mục tới chỗ khác, ví dụ đưa tài liệu từ dự án khác vào dự án hiện tại. Không bao giờ ghi đè file đã có."),
                 new Dictionary<string, object> {
-                    { "source", Prop("string", "File hoặc thư mục nguồn") },
-                    { "destination", Prop("string", "Đường dẫn đích; nếu là thư mục đã có thì chép vào bên trong") } }, "source", "destination"),
-            Tool("recall", "Nhớ lại những gì các agent đã ghi nhớ (quyết định, bài học, sự thật, ghi chú) và các dự án/file liên quan, có liên tưởng theo mạng nơ-ron. Gọi ở đầu mỗi việc. Để trống query để xem các ghi nhớ nổi bật gần đây.",
+                    { "source", Prop("string", L.T("Source file or folder", "File hoặc thư mục nguồn")) },
+                    { "destination", Prop("string", L.T("Destination path; if it is an existing folder, copy into it", "Đường dẫn đích; nếu là thư mục đã có thì chép vào bên trong")) } }, "source", "destination"),
+            Tool("recall", L.T("Recall what agents have remembered (decisions, lessons, facts, notes) and related projects/files, with associative spreading through the neural network. Call at the start of each task. Leave query empty for recent highlights.", "Nhớ lại những gì các agent đã ghi nhớ (quyết định, bài học, sự thật, ghi chú) và các dự án/file liên quan, có liên tưởng theo mạng nơ-ron. Gọi ở đầu mỗi việc. Để trống query để xem các ghi nhớ nổi bật gần đây."),
                 new Dictionary<string, object> {
-                    { "query", Prop("string", "Chủ đề cần nhớ lại, ví dụ 'thanh toán momo' hoặc tên dự án") },
-                    { "limit", Prop("integer", "Số ghi nhớ tối đa (mặc định 10)") } }),
-            Tool("remember", "Lưu một điều đáng nhớ vào trí nhớ dài hạn dùng chung cho mọi agent. Tự nối với dự án/file nguồn và các ghi nhớ gần nghĩa; nếu gần trùng ghi nhớ cũ thì củng cố ghi nhớ đó.",
+                    { "query", Prop("string", L.T("Topic to recall, e.g. 'stripe payments' or a project name", "Chủ đề cần nhớ lại, ví dụ 'thanh toán momo' hoặc tên dự án")) },
+                    { "limit", Prop("integer", L.T("Maximum memories (default 10)", "Số ghi nhớ tối đa (mặc định 10)")) } }),
+            Tool("remember", L.T("Save something worth keeping into the long-term memory shared by all agents. Links automatically to the source project/file and similar memories; a near-duplicate reinforces the existing memory.", "Lưu một điều đáng nhớ vào trí nhớ dài hạn dùng chung cho mọi agent. Tự nối với dự án/file nguồn và các ghi nhớ gần nghĩa; nếu gần trùng ghi nhớ cũ thì củng cố ghi nhớ đó."),
                 new Dictionary<string, object> {
-                    { "text", Prop("string", "Nội dung cần nhớ, viết đủ ý để agent khác hiểu mà không cần ngữ cảnh") },
-                    { "title", Prop("string", "Tiêu đề ngắn (tuỳ chọn)") },
-                    { "kind", Prop("string", "decision | lesson | fact | todo | note (mặc định note)") },
-                    { "source", Prop("string", "Đường dẫn file hoặc thư mục dự án liên quan, nhiều cái cách nhau bằng ';' (nên có)") },
-                    { "tags", Prop("string", "Từ khoá bổ sung để dễ nhớ lại (tuỳ chọn)") } }, "text"),
-            Tool("revise_memory", "Sửa nội dung một ghi nhớ hoặc đánh dấu nó đã cũ/sai. Bản cũ được giữ trong lịch sử; ghi nhớ đã cũ mờ dần chứ không bị xoá.",
+                    { "text", Prop("string", L.T("What to remember, written so another agent understands it without context", "Nội dung cần nhớ, viết đủ ý để agent khác hiểu mà không cần ngữ cảnh")) },
+                    { "title", Prop("string", L.T("Short title (optional)", "Tiêu đề ngắn (tuỳ chọn)")) },
+                    { "kind", Prop("string", L.T("decision | lesson | fact | todo | note (default note)", "decision | lesson | fact | todo | note (mặc định note)")) },
+                    { "source", Prop("string", L.T("Related file or project folder paths, separated by ';' (recommended)", "Đường dẫn file hoặc thư mục dự án liên quan, nhiều cái cách nhau bằng ';' (nên có)")) },
+                    { "tags", Prop("string", L.T("Extra keywords to help recall (optional)", "Từ khoá bổ sung để dễ nhớ lại (tuỳ chọn)")) } }, "text"),
+            Tool("revise_memory", L.T("Edit a memory or mark it outdated/wrong. The old version stays in history; outdated memories fade instead of being deleted.", "Sửa nội dung một ghi nhớ hoặc đánh dấu nó đã cũ/sai. Bản cũ được giữ trong lịch sử; ghi nhớ đã cũ mờ dần chứ không bị xoá."),
                 new Dictionary<string, object> {
-                    { "id", Prop("string", "Mã ghi nhớ, ví dụ n12") },
-                    { "text", Prop("string", "Nội dung mới (tuỳ chọn)") },
-                    { "outdated", Prop("boolean", "true = đánh dấu đã cũ/không còn đúng") } }, "id"),
-            Tool("connect", "Nối hai ý trong trí nhớ (ghi nhớ, file hoặc dự án) khi bạn nhận ra chúng liên quan.",
+                    { "id", Prop("string", L.T("Memory id, e.g. n12", "Mã ghi nhớ, ví dụ n12")) },
+                    { "text", Prop("string", L.T("New content (optional)", "Nội dung mới (tuỳ chọn)")) },
+                    { "outdated", Prop("boolean", L.T("true = mark outdated/no longer true", "true = đánh dấu đã cũ/không còn đúng")) } }, "id"),
+            Tool("connect", L.T("Link two items in memory (memory, file or project) when you notice they are related.", "Nối hai ý trong trí nhớ (ghi nhớ, file hoặc dự án) khi bạn nhận ra chúng liên quan."),
                 new Dictionary<string, object> {
-                    { "a", Prop("string", "Mã ghi nhớ (n12), đường dẫn file hoặc thư mục dự án") },
-                    { "b", Prop("string", "Ý thứ hai, cùng dạng") },
-                    { "why", Prop("string", "Vì sao liên quan (tuỳ chọn)") } }, "a", "b"),
-            Tool("index_status", "Trạng thái chỉ mục: số file, số dự án, lần cập nhật cuối, các ổ đang cắm. Đặt refresh=true để cập nhật lại ngay (chạy ngầm).",
-                new Dictionary<string, object> { { "refresh", Prop("boolean", "true = cập nhật chỉ mục ngay") } }),
+                    { "a", Prop("string", L.T("Memory id (n12), file path or project folder", "Mã ghi nhớ (n12), đường dẫn file hoặc thư mục dự án")) },
+                    { "b", Prop("string", L.T("Second item, same format", "Ý thứ hai, cùng dạng")) },
+                    { "why", Prop("string", L.T("Why they are related (optional)", "Vì sao liên quan (tuỳ chọn)")) } }, "a", "b"),
+            Tool("index_status", L.T("Index status: file count, project count, last update, connected drives. Set refresh=true to re-index now (in the background).", "Trạng thái chỉ mục: số file, số dự án, lần cập nhật cuối, các ổ đang cắm. Đặt refresh=true để cập nhật lại ngay (chạy ngầm)."),
+                new Dictionary<string, object> { { "refresh", Prop("boolean", L.T("true = re-index now", "true = cập nhật chỉ mục ngay")) } }),
         };
     }
 
@@ -860,8 +916,8 @@ static class McpServer
     static string Note()
     {
         if (Brain.FileCount == 0)
-            return Brain.Building ? "\n(Second Brain đang lập chỉ mục lần đầu, kết quả chưa đầy đủ. " + Brain.Progress + ")" : "\n(Chỉ mục còn trống.)";
-        return Brain.Building ? "\n(Đang cập nhật chỉ mục ngầm.)" : "";
+            return Brain.Building ? L.T("\n(Second Brain is building its first index; results are incomplete. ", "\n(Second Brain đang lập chỉ mục lần đầu, kết quả chưa đầy đủ. ") + Brain.Progress + ")" : L.T("\n(The index is empty.)", "\n(Chỉ mục còn trống.)");
+        return Brain.Building ? L.T("\n(Updating the index in the background.)", "\n(Đang cập nhật chỉ mục ngầm.)") : "";
     }
 
     static string CallTool(string name, Dictionary<string, object> a)
@@ -874,27 +930,27 @@ static class McpServer
             {
                 var q = S(a, "query") ?? "";
                 var hits = Brain.Search(q, S(a, "path"), S(a, "ext"), B(a, "name_only"), Math.Max(1, Math.Min(100, I(a, "limit", 20))));
-                if (hits.Count == 0) return "Không tìm thấy kết quả cho \"" + q + "\"." + Note();
-                sb.AppendLine("Tìm thấy " + hits.Count + " kết quả cho \"" + q + "\":");
+                if (hits.Count == 0) return L.T("No results for \"", "Không tìm thấy kết quả cho \"") + q + "\"." + Note();
+                sb.AppendLine(L.T("Found ", "Tìm thấy ") + hits.Count + L.T(" results for \"", " kết quả cho \"") + q + "\":");
                 foreach (var h in hits)
                 {
                     sb.AppendLine().Append("• ").Append(h.File.Path);
-                    sb.Append("  (" + Cleaner.Fmt(h.File.Size) + ", sửa " + DateTime.FromBinary(h.File.Mtime).ToString("dd/MM/yyyy") + ")");
-                    if (!Brain.IsOnline(h.File.Path)) sb.Append("  [ổ đang không cắm]");
+                    sb.Append("  (" + Cleaner.Fmt(h.File.Size) + L.T(", modified ", ", sửa ") + DateTime.FromBinary(h.File.Mtime).ToString("dd/MM/yyyy") + ")");
+                    if (!Brain.IsOnline(h.File.Path)) sb.Append(L.T("  [drive not connected]", "  [ổ đang không cắm]"));
                     sb.AppendLine();
                     var proj = ProjectOf(h.File.Path);
-                    if (proj != null) sb.AppendLine("  Dự án: " + proj);
+                    if (proj != null) sb.AppendLine(L.T("  Project: ", "  Dự án: ") + proj);
                     if (h.Snippet != null) foreach (var l in h.Snippet.Split('\n')) sb.AppendLine("    " + l.TrimEnd());
                 }
                 var mem = Memory.RecallRaw(q, 3, false).Where(r => r.N.Kind != "file").ToList();
-                if (mem.Count > 0) sb.AppendLine().AppendLine("Ghi nhớ liên quan (gọi recall để xem thêm):").AppendLine(Memory.Format(mem, false));
+                if (mem.Count > 0) sb.AppendLine().AppendLine(L.T("Related memories (call recall for more):", "Ghi nhớ liên quan (gọi recall để xem thêm):")).AppendLine(Memory.Format(mem, false));
                 return sb.ToString().TrimEnd() + Note();
             }
             case "recall":
             {
                 var list = Memory.RecallRaw(S(a, "query"), Math.Max(1, Math.Min(50, I(a, "limit", 10))), true);
-                if (list.Count == 0) return "Chưa có ghi nhớ nào về \"" + S(a, "query") + "\". Khi học được điều đáng giữ, hãy dùng remember.";
-                return "Nhớ lại được " + list.Count + " ý:\n" + Memory.Format(list, true);
+                if (list.Count == 0) return L.T("No memories about \"", "Chưa có ghi nhớ nào về \"") + S(a, "query") + L.T("\" yet. When you learn something worth keeping, use remember.", "\". Khi học được điều đáng giữ, hãy dùng remember.");
+                return L.T("Recalled ", "Nhớ lại được ") + list.Count + L.T(" items:\n", " ý:\n") + Memory.Format(list, true);
             }
             case "remember":
                 return Memory.Remember(S(a, "text"), S(a, "title"), S(a, "kind"), S(a, "source"), S(a, "tags"));
@@ -905,12 +961,12 @@ static class McpServer
             case "list_projects":
             {
                 var list = Brain.Projects(S(a, "filter"));
-                if (list.Count == 0) return "Chưa thấy dự án nào." + Note();
-                sb.AppendLine(list.Count + " dự án:");
+                if (list.Count == 0) return L.T("No projects found.", "Chưa thấy dự án nào.") + Note();
+                sb.AppendLine(list.Count + L.T(" projects:", " dự án:"));
                 foreach (var p in list.Take(200))
                 {
-                    sb.AppendLine().AppendLine("• " + p.Name + " — " + p.Path + (Brain.IsOnline(p.Path) ? "" : "  [ổ đang không cắm]"));
-                    sb.AppendLine("  Dùng gần nhất: " + p.LastWrite.ToString("dd/MM/yyyy") + " · Dấu hiệu: " + p.Markers);
+                    sb.AppendLine().AppendLine("• " + p.Name + " — " + p.Path + (Brain.IsOnline(p.Path) ? "" : L.T("  [drive not connected]", "  [ổ đang không cắm]")));
+                    sb.AppendLine(L.T("  Last used: ", "  Dùng gần nhất: ") + p.LastWrite.ToString("dd/MM/yyyy") + L.T(" · Markers: ", " · Dấu hiệu: ") + p.Markers);
                     if (!string.IsNullOrEmpty(p.Summary)) sb.AppendLine("  " + p.Summary);
                 }
                 return sb.ToString().TrimEnd() + Note();
@@ -918,9 +974,9 @@ static class McpServer
             case "project_overview":
             {
                 var path = S(a, "path");
-                if (!Directory.Exists(path)) throw new DirectoryNotFoundException("Không tìm thấy thư mục: " + path);
+                if (!Directory.Exists(path)) throw new DirectoryNotFoundException(L.T("Folder not found: ", "Không tìm thấy thư mục: ") + path);
                 var di = new DirectoryInfo(path);
-                sb.AppendLine("Dự án: " + di.FullName).AppendLine().AppendLine("Nội dung cấp đầu:");
+                sb.AppendLine(L.T("Project: ", "Dự án: ") + di.FullName).AppendLine().AppendLine(L.T("Top-level contents:", "Nội dung cấp đầu:"));
                 foreach (var e in di.GetFileSystemInfos().OrderBy(e => !(e is DirectoryInfo)).ThenBy(e => e.Name).Take(200))
                     sb.AppendLine("  " + (e is DirectoryInfo ? e.Name + "\\" : e.Name + "  (" + Cleaner.Fmt(((FileInfo)e).Length) + ")"));
                 foreach (var n in new[] { "CLAUDE.md", "AGENTS.md", "README.md", "README.txt", "README" })
@@ -928,40 +984,40 @@ static class McpServer
                     var f = Path.Combine(path, n);
                     if (!File.Exists(f)) continue;
                     var lines = Brain.ReadText(f).Split('\n');
-                    sb.AppendLine().AppendLine("===== " + n + (lines.Length > 200 ? " (200/" + lines.Length + " dòng đầu)" : "") + " =====");
+                    sb.AppendLine().AppendLine("===== " + n + (lines.Length > 200 ? " (200/" + lines.Length + L.T(" first lines)", " dòng đầu)") : "") + " =====");
                     foreach (var l in lines.Take(200)) sb.AppendLine(l.TrimEnd('\r'));
                 }
                 var memo = Memory.ForProject(di.FullName);
-                if (memo.Length > 0) sb.AppendLine().AppendLine("===== Trí nhớ Second Brain =====").AppendLine(memo);
+                if (memo.Length > 0) sb.AppendLine().AppendLine(L.T("===== Second Brain memory =====", "===== Trí nhớ Second Brain =====")).AppendLine(memo);
                 Memory.Experience(di.FullName);
                 return sb.ToString().TrimEnd();
             }
             case "read_file":
             {
                 var path = S(a, "path");
-                if (!File.Exists(path)) throw new FileNotFoundException("Không tìm thấy file: " + path);
+                if (!File.Exists(path)) throw new FileNotFoundException(L.T("File not found: ", "Không tìm thấy file: ") + path);
                 var fi = new FileInfo(path);
                 if (!Brain.IsReadable(path) && fi.Length > 0)
                 {
                     // Thử đọc như văn bản; nếu là file nhị phân thì báo thông tin cơ bản
                     try { if (fi.Length > 5 * 1024 * 1024) throw new InvalidDataException(); Brain.ReadText(path); }
-                    catch { return "File " + path + " không phải văn bản (" + Cleaner.Fmt(fi.Length) + ", sửa " + fi.LastWriteTime.ToString("dd/MM/yyyy HH:mm") + "). Dùng copy để chép file này sang dự án nếu cần."; }
+                    catch { return "File " + path + L.T(" is not text (", " không phải văn bản (") + Cleaner.Fmt(fi.Length) + L.T(", modified ", ", sửa ") + fi.LastWriteTime.ToString("dd/MM/yyyy HH:mm") + L.T("). Use copy to bring this file into the project if needed.", "). Dùng copy để chép file này sang dự án nếu cần."); }
                 }
-                if (fi.Length > 50L * 1024 * 1024) throw new IOException("File quá lớn để đọc (" + Cleaner.Fmt(fi.Length) + ").");
+                if (fi.Length > 50L * 1024 * 1024) throw new IOException(L.T("File too large to read (", "File quá lớn để đọc (") + Cleaner.Fmt(fi.Length) + ").");
                 var all = Brain.ReadText(path).Split('\n');
                 int start = Math.Max(1, I(a, "start_line", 1)), max = Math.Max(1, Math.Min(2000, I(a, "max_lines", 400)));
                 int end = Math.Min(all.Length, start - 1 + max);
-                sb.AppendLine(path + "  (" + Cleaner.Fmt(fi.Length) + ", " + all.Length + " dòng, sửa " + fi.LastWriteTime.ToString("dd/MM/yyyy HH:mm") + ")");
-                sb.AppendLine("Dòng " + start + "–" + end + ":");
+                sb.AppendLine(path + "  (" + Cleaner.Fmt(fi.Length) + ", " + all.Length + L.T(" lines, modified ", " dòng, sửa ") + fi.LastWriteTime.ToString("dd/MM/yyyy HH:mm") + ")");
+                sb.AppendLine(L.T("Lines ", "Dòng ") + start + "–" + end + ":");
                 int chars = 0;
                 for (int i = start - 1; i < end; i++)
                 {
                     var l = all[i].TrimEnd('\r');
                     chars += l.Length;
-                    if (chars > 200000) { sb.AppendLine("… (cắt bớt, đọc tiếp từ dòng " + (i + 1) + ")"); break; }
+                    if (chars > 200000) { sb.AppendLine(L.T("… (truncated, continue from line ", "… (cắt bớt, đọc tiếp từ dòng ") + (i + 1) + ")"); break; }
                     sb.Append(i + 1).Append('\t').AppendLine(l);
                 }
-                if (end < all.Length) sb.AppendLine("… còn " + (all.Length - end) + " dòng, gọi lại với start_line=" + (end + 1));
+                if (end < all.Length) sb.AppendLine(L.T("… ", "… còn ") + (all.Length - end) + L.T(" more lines, call again with start_line=", " dòng, gọi lại với start_line=") + (end + 1));
                 Memory.Experience(path);
                 return sb.ToString().TrimEnd();
             }
@@ -970,17 +1026,17 @@ static class McpServer
                 var path = S(a, "path");
                 if (string.IsNullOrWhiteSpace(path))
                 {
-                    sb.AppendLine("Các ổ đĩa đang có:");
+                    sb.AppendLine(L.T("Available drives:", "Các ổ đĩa đang có:"));
                     foreach (var d in Brain.Drives())
-                        sb.AppendLine("  " + d.Name + "  " + (d.DriveType == DriveType.Removable ? "USB/thẻ nhớ" : "ổ cứng") + "  \"" + d.VolumeLabel + "\"  trống " + Cleaner.Fmt(d.AvailableFreeSpace) + "/" + Cleaner.Fmt(d.TotalSize));
+                        sb.AppendLine("  " + d.Name + "  " + (d.DriveType == DriveType.Removable ? L.T("USB/memory card", "USB/thẻ nhớ") : L.T("hard drive", "ổ cứng")) + "  \"" + d.VolumeLabel + L.T("\"  free ", "\"  trống ") + Cleaner.Fmt(d.AvailableFreeSpace) + "/" + Cleaner.Fmt(d.TotalSize));
                     return sb.ToString().TrimEnd();
                 }
-                if (!Directory.Exists(path)) throw new DirectoryNotFoundException("Không tìm thấy thư mục: " + path);
+                if (!Directory.Exists(path)) throw new DirectoryNotFoundException(L.T("Folder not found: ", "Không tìm thấy thư mục: ") + path);
                 var entries = new DirectoryInfo(path).GetFileSystemInfos().OrderBy(e => !(e is DirectoryInfo)).ThenBy(e => e.Name).ToList();
-                sb.AppendLine(path + " (" + entries.Count + " mục):");
+                sb.AppendLine(path + " (" + entries.Count + L.T(" items):", " mục):"));
                 foreach (var e in entries.Take(1000))
                     sb.AppendLine("  " + (e is DirectoryInfo ? e.Name + "\\" : e.Name + "  " + Cleaner.Fmt(((FileInfo)e).Length)) + "  " + e.LastWriteTime.ToString("dd/MM/yyyy"));
-                if (entries.Count > 1000) sb.AppendLine("  … và " + (entries.Count - 1000) + " mục khác");
+                if (entries.Count > 1000) sb.AppendLine(L.T("  … and ", "  … và ") + (entries.Count - 1000) + L.T(" more", " mục khác"));
                 return sb.ToString().TrimEnd();
             }
             case "copy":
@@ -994,17 +1050,17 @@ static class McpServer
                 Brain.EnsureLoaded();
                 if (B(a, "refresh") && !Brain.Building) Task.Run(() => { try { Brain.Build(); } catch { } });
                 Thread.Sleep(100);
-                sb.AppendLine("Số file trong chỉ mục: " + Brain.FileCount.ToString("N0"));
-                sb.AppendLine("Số dự án: " + Brain.ProjectCount);
+                sb.AppendLine(L.T("Files in index: ", "Số file trong chỉ mục: ") + Brain.FileCount.ToString("N0"));
+                sb.AppendLine(L.T("Projects: ", "Số dự án: ") + Brain.ProjectCount);
                 var mc = Memory.Counts();
-                sb.AppendLine("Trí nhớ: " + mc.Item1 + " ghi nhớ, " + mc.Item2 + " liên kết");
-                sb.AppendLine("Cập nhật lần cuối: " + (Brain.BuiltAt == DateTime.MinValue ? "chưa có" : Brain.BuiltAt.ToString("dd/MM/yyyy HH:mm")));
-                sb.AppendLine("Đang cập nhật: " + (Brain.Building ? "có — " + Brain.Progress : "không"));
-                sb.Append("Ổ đang cắm: " + string.Join(", ", Brain.Drives().Select(d => d.Name.TrimEnd('\\'))));
+                sb.AppendLine(L.T("Memory: ", "Trí nhớ: ") + mc.Item1 + L.T(" memories, ", " ghi nhớ, ") + mc.Item2 + L.T(" links", " liên kết"));
+                sb.AppendLine(L.T("Last updated: ", "Cập nhật lần cuối: ") + (Brain.BuiltAt == DateTime.MinValue ? L.T("never", "chưa có") : Brain.BuiltAt.ToString("dd/MM/yyyy HH:mm")));
+                sb.AppendLine(L.T("Updating: ", "Đang cập nhật: ") + (Brain.Building ? L.T("yes — ", "có — ") + Brain.Progress : L.T("no", "không")));
+                sb.Append(L.T("Connected drives: ", "Ổ đang cắm: ") + string.Join(", ", Brain.Drives().Select(d => d.Name.TrimEnd('\\'))));
                 return sb.ToString();
             }
             default:
-                throw new ArgumentException("Không có công cụ: " + name);
+                throw new ArgumentException(L.T("No such tool: ", "Không có công cụ: ") + name);
         }
     }
 }

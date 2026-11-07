@@ -13,7 +13,7 @@ using System.Windows.Forms;
 
 [assembly: System.Reflection.AssemblyTitle("Bentar Second Brain")]
 [assembly: System.Reflection.AssemblyProduct("Bentar Second Brain")]
-[assembly: System.Reflection.AssemblyVersion("2.9.0.0")]
+[assembly: System.Reflection.AssemblyVersion("2.9.2.0")]
 
 // Cập nhật từ GitHub Releases: so sánh tag (vd "v2.1.0") với phiên bản app, tải file .exe mới rồi tự thay thế
 static class Updater
@@ -36,7 +36,9 @@ static class Updater
         string json;
         using (var wc = Client()) json = wc.DownloadString("https://api.github.com/repos/" + Repo + "/releases/latest");
         var tag = System.Text.RegularExpressions.Regex.Match(json, "\"tag_name\"\\s*:\\s*\"v?([0-9.]+)\"");
-        var url = System.Text.RegularExpressions.Regex.Match(json, "\"browser_download_url\"\\s*:\\s*\"([^\"]+\\.exe)\"");
+        // Mỗi bản phát hành là một file .zip trên GitHub Releases (bản cũ chỉ có .exe thì dùng .exe)
+        var url = System.Text.RegularExpressions.Regex.Match(json, "\"browser_download_url\"\\s*:\\s*\"([^\"]+\\.zip)\"");
+        if (!url.Success) url = System.Text.RegularExpressions.Regex.Match(json, "\"browser_download_url\"\\s*:\\s*\"([^\"]+\\.exe)\"");
         var body = System.Text.RegularExpressions.Regex.Match(json, "\"body\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"");
         if (!tag.Success || !url.Success) return null;
         var v = new Version(tag.Groups[1].Value);
@@ -50,8 +52,20 @@ static class Updater
     {
         string target = Application.ExecutablePath;
         string newExe = Path.Combine(Path.GetTempPath(), "BentarSecondBrain-" + r.Tag + ".exe");
-        using (var wc = Client()) wc.DownloadFile(r.ExeUrl, newExe);
-        if (new FileInfo(newExe).Length < 10 * 1024) throw new Exception("File tải về không hợp lệ.");
+        if (r.ExeUrl.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+        {
+            string zip = newExe + ".zip";
+            using (var wc = Client()) wc.DownloadFile(r.ExeUrl, zip);
+            using (var z = new System.IO.Compression.ZipArchive(File.OpenRead(zip)))
+            {
+                var entry = z.Entries.Where(e => e.Name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)).OrderByDescending(e => e.Length).FirstOrDefault();
+                if (entry == null) throw new Exception(L.T("The release .zip has no .exe inside.", "File .zip của bản phát hành không có file .exe."));
+                using (var src = entry.Open()) using (var dst = File.Create(newExe)) src.CopyTo(dst);
+            }
+            try { File.Delete(zip); } catch { }
+        }
+        else using (var wc = Client()) wc.DownloadFile(r.ExeUrl, newExe);
+        if (new FileInfo(newExe).Length < 10 * 1024) throw new Exception(L.T("The downloaded file is invalid.", "File tải về không hợp lệ."));
 
         string installed = Installer.Exe;   // bản đã cài (lịch tự động và agent dùng chung)
         Func<string, string> q = s => "'" + s.Replace("'", "''") + "'";
@@ -90,7 +104,8 @@ static class Cleaner
 
     public const string AppName = "Bentar Second Brain";
     static readonly string Local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-    public static readonly string DataDir = Path.Combine(Local, "BentarSecondBrain");
+    // BSB_DATA_DIR: dùng thư mục dữ liệu khác (để chạy thử mà không đụng tới bộ não thật)
+    public static readonly string DataDir = Environment.GetEnvironmentVariable("BSB_DATA_DIR") ?? Path.Combine(Local, "BentarSecondBrain");
     public static readonly string SettingsFile = Path.Combine(DataDir, "settings.ini");
     public static readonly string LogFile = Path.Combine(DataDir, "nhat-ky.txt");
 
@@ -110,19 +125,19 @@ static class Cleaner
     {
         return new List<CleanItem>
         {
-            new CleanItem("recycle", "Thùng rác (Recycle Bin)", true, null),
-            new CleanItem("temp", "File tạm của người dùng (Temp)", true, () => new[] { Path.GetTempPath() }),
-            new CleanItem("wintemp", "File tạm của Windows", true, () => new[] { @"C:\Windows\Temp" }),
-            new CleanItem("chrome", "Bộ nhớ đệm Google Chrome", true, () => BrowserCaches(@"Google\Chrome\User Data")),
-            new CleanItem("edge", "Bộ nhớ đệm Microsoft Edge", true, () => BrowserCaches(@"Microsoft\Edge\User Data")),
-            new CleanItem("coccoc", "Bộ nhớ đệm Cốc Cốc", true, () => BrowserCaches(@"CocCoc\Browser\User Data")),
-            new CleanItem("npm", "Bộ nhớ đệm npm (npm-cache)", true, () => new[] { Path.Combine(Local, "npm-cache") }),
-            new CleanItem("crash", "Báo cáo lỗi & crash dump", true, () => new[] {
+            new CleanItem("recycle", L.T("Recycle Bin", "Thùng rác (Recycle Bin)"), true, null),
+            new CleanItem("temp", L.T("User temp files (Temp)", "File tạm của người dùng (Temp)"), true, () => new[] { Path.GetTempPath() }),
+            new CleanItem("wintemp", L.T("Windows temp files", "File tạm của Windows"), true, () => new[] { @"C:\Windows\Temp" }),
+            new CleanItem("chrome", L.T("Google Chrome cache", "Bộ nhớ đệm Google Chrome"), true, () => BrowserCaches(@"Google\Chrome\User Data")),
+            new CleanItem("edge", L.T("Microsoft Edge cache", "Bộ nhớ đệm Microsoft Edge"), true, () => BrowserCaches(@"Microsoft\Edge\User Data")),
+            new CleanItem("coccoc", L.T("Coc Coc cache", "Bộ nhớ đệm Cốc Cốc"), true, () => BrowserCaches(@"CocCoc\Browser\User Data")),
+            new CleanItem("npm", L.T("npm cache (npm-cache)", "Bộ nhớ đệm npm (npm-cache)"), true, () => new[] { Path.Combine(Local, "npm-cache") }),
+            new CleanItem("crash", L.T("Error reports & crash dumps", "Báo cáo lỗi & crash dump"), true, () => new[] {
                 Path.Combine(Local, "CrashDumps"),
                 @"C:\ProgramData\Microsoft\Windows\WER\ReportArchive",
                 @"C:\ProgramData\Microsoft\Windows\WER\ReportQueue" }),
-            new CleanItem("dx", "Bộ nhớ đệm đồ hoạ DirectX", true, () => new[] { Path.Combine(Local, "D3DSCache") }),
-            new CleanItem("wu", "File cập nhật Windows đã tải (cần quyền Admin)", false, () => new[] { @"C:\Windows\SoftwareDistribution\Download" }),
+            new CleanItem("dx", L.T("DirectX shader cache", "Bộ nhớ đệm đồ hoạ DirectX"), true, () => new[] { Path.Combine(Local, "D3DSCache") }),
+            new CleanItem("wu", L.T("Downloaded Windows Update files (needs Admin)", "File cập nhật Windows đã tải (cần quyền Admin)"), false, () => new[] { @"C:\Windows\SoftwareDistribution\Download" }),
         };
     }
 
@@ -308,7 +323,7 @@ static class Scheduler
         File.WriteAllText(xmlFile, xml, Encoding.Unicode);
         int code = Schtasks("/Create /TN \"" + TaskName + "\" /XML \"" + xmlFile + "\" /F");
         try { File.Delete(xmlFile); } catch { }
-        if (code != 0) throw new Exception("Không tạo được lịch (mã lỗi " + code + ").");
+        if (code != 0) throw new Exception(L.T("Could not create the schedule (error code ", "Không tạo được lịch (mã lỗi ") + code + ").");
     }
 
     public static void Disable() { Schtasks("/Delete /TN \"" + TaskName + "\" /F"); }
@@ -331,7 +346,7 @@ static class Scheduler
                 var s = Settings.Load();
                 if (s.AutoEnabled) Enable(s);
                 Schtasks("/Delete /TN \"" + oldTask + "\" /F");
-                Cleaner.Log("Đã chuyển lịch tự động sang tên mới Bentar Second Brain");
+                Cleaner.Log(L.T("Moved the automatic schedule to the new name Bentar Second Brain", "Đã chuyển lịch tự động sang tên mới Bentar Second Brain"));
             }
         }
         catch { }
@@ -443,7 +458,7 @@ static class Analyzer
             {
                 var keep = h.OrderByDescending(f => f.LastWriteTime).First();
                 foreach (var f in h.Where(f => f != keep))
-                    reasons[f.FullName] = "Trùng lặp với " + keep.Name + " (" + keep.Directory.Name + ")";
+                    reasons[f.FullName] = L.T("Duplicate of ", "Trùng lặp với ") + keep.Name + " (" + keep.Directory.Name + ")";
             }
 
         // 2. Backup cũ: cùng tên website/dự án, đã có bản mới hơn
@@ -453,7 +468,7 @@ static class Analyzer
         {
             var newest = g.OrderByDescending(f => f.LastWriteTime).First();
             foreach (var f in g.Where(f => f != newest && !reasons.ContainsKey(f.FullName)))
-                reasons[f.FullName] = "Bản backup cũ, đã có bản mới hơn (" + newest.LastWriteTime.ToString("dd/MM/yyyy") + ")";
+                reasons[f.FullName] = L.T("Old backup, a newer one exists (", "Bản backup cũ, đã có bản mới hơn (") + newest.LastWriteTime.ToString("dd/MM/yyyy") + ")";
         }
 
         foreach (var f in files)
@@ -461,13 +476,13 @@ static class Analyzer
             if (reasons.ContainsKey(f.FullName)) continue;
             bool c = OnC(f.FullName);
             if (IsInstaller(f) && (c ? f.FullName.StartsWith(Downloads, StringComparison.OrdinalIgnoreCase) : LooksLikeSetup(f)))
-                reasons[f.FullName] = "File cài đặt phần mềm – đã cài xong thì có thể xoá";
+                reasons[f.FullName] = L.T("Software installer – safe to delete once installed", "File cài đặt phần mềm – đã cài xong thì có thể xoá");
             else if (c && f.LastWriteTime < DateTime.Now.AddDays(-180))
-                reasons[f.FullName] = "Hơn 6 tháng không thay đổi – xoá nếu không cần, hoặc chuyển sang ổ D";
+                reasons[f.FullName] = L.T("Unchanged for over 6 months – delete if not needed, or move to drive D", "Hơn 6 tháng không thay đổi – xoá nếu không cần, hoặc chuyển sang ổ D");
             else if (c && f.Length >= 200 * MB)
-                reasons[f.FullName] = "File lớn – nên chuyển sang ổ D cho ổ C nhẹ";
+                reasons[f.FullName] = L.T("Large file – consider moving it to drive D to free up C", "File lớn – nên chuyển sang ổ D cho ổ C nhẹ");
             else if (!c && f.Length >= 500 * MB && f.LastWriteTime < DateTime.Now.AddDays(-180))
-                reasons[f.FullName] = "File lớn, hơn 6 tháng không thay đổi – xoá nếu không còn cần";
+                reasons[f.FullName] = L.T("Large file unchanged for over 6 months – delete if no longer needed", "File lớn, hơn 6 tháng không thay đổi – xoá nếu không còn cần");
         }
 
         var result = files.Where(f => reasons.ContainsKey(f.FullName))
@@ -477,7 +492,7 @@ static class Analyzer
         if (Directory.Exists(@"C:\Windows.old"))
             result.Add(new Finding { Path = @"C:\Windows.old", IsFolder = true, Size = Walk(@"C:\Windows.old").Sum(f => f.Length),
                 Date = Directory.GetLastWriteTime(@"C:\Windows.old"),
-                Reason = "Bản Windows cũ sau khi nâng cấp – xoá bằng Disk Cleanup (cleanmgr), không xoá tay" });
+                Reason = L.T("Previous Windows after an upgrade – remove with Disk Cleanup (cleanmgr), not by hand", "Bản Windows cũ sau khi nâng cấp – xoá bằng Disk Cleanup (cleanmgr), không xoá tay") });
 
         return result.OrderByDescending(r => r.Size).ToList();
     }
@@ -570,12 +585,12 @@ static class Analyzer
                 if (r.LastUsed == DateTime.MinValue) r.LastUsed = Directory.GetLastWriteTime(sub);
 
                 int days = (int)(DateTime.Now - r.LastUsed).TotalDays;
-                if (r.Ai && days < 365) r.Rating = "Có dấu vết AI/lập trình làm việc – nên giữ";
-                else if (days >= 365) r.Rating = "Hơn 1 năm không đụng tới – có thể là thư mục chết" + (r.Ai ? " (từng có AI làm việc)" : "");
-                else if (days >= 180) r.Rating = "Ít dùng (hơn 6 tháng)";
-                else if (days >= 60) r.Rating = "Thỉnh thoảng dùng";
-                else r.Rating = r.OpenedRecently ? "Đang dùng (vừa mở gần đây)" : "Đang dùng";
-                if (r.Files == 0) r.Rating = "Thư mục rỗng – xoá được";
+                if (r.Ai && days < 365) r.Rating = L.T("Has traces of AI/coding work – keep it", "Có dấu vết AI/lập trình làm việc – nên giữ");
+                else if (days >= 365) r.Rating = L.T("Untouched for over a year – possibly a dead folder", "Hơn 1 năm không đụng tới – có thể là thư mục chết") + (r.Ai ? L.T(" (AI worked here before)", " (từng có AI làm việc)") : "");
+                else if (days >= 180) r.Rating = L.T("Rarely used (over 6 months)", "Ít dùng (hơn 6 tháng)");
+                else if (days >= 60) r.Rating = L.T("Used occasionally", "Thỉnh thoảng dùng");
+                else r.Rating = r.OpenedRecently ? L.T("In use (opened recently)", "Đang dùng (vừa mở gần đây)") : L.T("In use", "Đang dùng");
+                if (r.Files == 0) r.Rating = L.T("Empty folder – safe to delete", "Thư mục rỗng – xoá được");
                 r.Days = days;
                 result.Add(r);
             }
@@ -589,15 +604,15 @@ static class Analyzer
         string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         return new List<KeepItem>
         {
-            new KeepItem("Windows (hệ điều hành)", "KHÔNG xoá – xoá nhầm máy sẽ không khởi động được", @"C:\Windows"),
-            new KeepItem("Phần mềm đã cài", "Muốn bỏ thì gỡ trong Settings > Apps, không xoá thư mục", @"C:\Program Files", @"C:\Program Files (x86)"),
-            new KeepItem("Dữ liệu chung của phần mềm (ProgramData)", "Phần mềm cần để chạy – không xoá", @"C:\ProgramData"),
-            new KeepItem("Cài đặt & tài khoản phần mềm (AppData\\Roaming)", "Đăng nhập Zalo, Zoom, Office... nằm ở đây – không xoá", roaming),
-            new KeepItem("Hồ sơ trình duyệt (Chrome, Cốc Cốc, Edge)", "Mật khẩu, bookmark, lịch sử – chỉ xoá cache (đã có ở tab An toàn)",
+            new KeepItem(L.T("Windows (operating system)", "Windows (hệ điều hành)"), L.T("DO NOT delete – the PC will not boot", "KHÔNG xoá – xoá nhầm máy sẽ không khởi động được"), @"C:\Windows"),
+            new KeepItem(L.T("Installed software", "Phần mềm đã cài"), L.T("Uninstall in Settings > Apps instead of deleting folders", "Muốn bỏ thì gỡ trong Settings > Apps, không xoá thư mục"), @"C:\Program Files", @"C:\Program Files (x86)"),
+            new KeepItem(L.T("Shared program data (ProgramData)", "Dữ liệu chung của phần mềm (ProgramData)"), L.T("Needed by software to run – do not delete", "Phần mềm cần để chạy – không xoá"), @"C:\ProgramData"),
+            new KeepItem(L.T("App settings & accounts (AppData\\Roaming)", "Cài đặt & tài khoản phần mềm (AppData\\Roaming)"), L.T("Sign-ins for Zalo, Zoom, Office... live here – do not delete", "Đăng nhập Zalo, Zoom, Office... nằm ở đây – không xoá"), roaming),
+            new KeepItem(L.T("Browser profiles (Chrome, Coc Coc, Edge)", "Hồ sơ trình duyệt (Chrome, Cốc Cốc, Edge)"), L.T("Passwords, bookmarks, history – only clear the cache (in the Safe tab)", "Mật khẩu, bookmark, lịch sử – chỉ xoá cache (đã có ở tab An toàn)"),
                 Path.Combine(local, @"Google\Chrome\User Data"), Path.Combine(local, @"CocCoc\Browser\User Data"), Path.Combine(local, @"Microsoft\Edge\User Data")),
-            new KeepItem("Tài liệu, Desktop, Ảnh của bạn", "Dữ liệu cá nhân – nên sao lưu; muốn ổ C trống thì chuyển sang ổ D",
+            new KeepItem(L.T("Your Documents, Desktop, Pictures", "Tài liệu, Desktop, Ảnh của bạn"), L.T("Personal data – back it up; move it to drive D to free up C", "Dữ liệu cá nhân – nên sao lưu; muốn ổ C trống thì chuyển sang ổ D"),
                 Path.Combine(Home, "Documents"), Path.Combine(Home, "Desktop"), Path.Combine(Home, "Pictures")),
-            new KeepItem("pagefile.sys / hiberfil.sys", "File hệ thống Windows tự quản lý – không xoá", @"C:\pagefile.sys", @"C:\hiberfil.sys"),
+            new KeepItem("pagefile.sys / hiberfil.sys", L.T("System files managed by Windows – do not delete", "File hệ thống Windows tự quản lý – không xoá"), @"C:\pagefile.sys", @"C:\hiberfil.sys"),
         };
     }
 
@@ -648,18 +663,18 @@ partial class MainForm : Form
     async Task ConnectAgents()
     {
         try { if (!Installer.IsInstalled) Installer.Install(); }
-        catch (Exception ex) { MessageBox.Show("Không cài được app vào " + Installer.Dir + ":\n" + ex.Message, Text); return; }
+        catch (Exception ex) { MessageBox.Show(L.T("Could not install the app to ", "Không cài được app vào ") + Installer.Dir + ":\n" + ex.Message, Text); return; }
         var lines = await Task.Run(() => AgentLinks.ConnectAll(false));
-        MessageBox.Show(lines.Count == 0 ? "Không tìm thấy agent nào trên máy (Claude Code, Claude Desktop, Cursor, Windsurf, Codex, Gemini CLI)." :
-            "Kết nối Second Brain:\n\n" + string.Join("\n", lines) + "\n\nMở phiên agent MỚI là dùng được.", Text);
+        MessageBox.Show(lines.Count == 0 ? L.T("No agents found on this PC (Claude Code, Claude Desktop, Cursor, Windsurf, Codex, Gemini CLI).", "Không tìm thấy agent nào trên máy (Claude Code, Claude Desktop, Cursor, Windsurf, Codex, Gemini CLI).") :
+            L.T("Connecting Second Brain:\n\n", "Kết nối Second Brain:\n\n") + string.Join("\n", lines) + L.T("\n\nOpen a NEW agent session to start using it.", "\n\nMở phiên agent MỚI là dùng được."), Text);
     }
 
     void UpdateInfo()
     {
-        try { lblDisk.Text = "Còn trống:  " + string.Join("   |   ", Analyzer.FixedDrives().Select(d => "Ổ " + d.Name.Substring(0, 1) + ": " + Cleaner.Fmt(d.AvailableFreeSpace) + " / " + Cleaner.Fmt(d.TotalSize))); }
+        try { lblDisk.Text = L.T("Free space:  ", "Còn trống:  ") + string.Join("   |   ", Analyzer.FixedDrives().Select(d => L.T("Drive ", "Ổ ") + d.Name.Substring(0, 1) + ": " + Cleaner.Fmt(d.AvailableFreeSpace) + " / " + Cleaner.Fmt(d.TotalSize))); }
         catch { lblDisk.Text = ""; }
         string last = Cleaner.LastLog();
-        lblLast.Text = last == null ? "" : "Lần dọn gần nhất:\n" + last;
+        lblLast.Text = last == null ? "" : L.T("Last cleanup:\n", "Lần dọn gần nhất:\n") + last;
     }
 
     List<CleanItem> Chosen()
@@ -676,33 +691,33 @@ partial class MainForm : Form
 
     async Task Scan()
     {
-        SetBusy(true, "Đang quét...");
+        SetBusy(true, L.T("Scanning...", "Đang quét..."));
         long total = 0;
         foreach (ListViewItem row in list.Items)
         {
             var it = (CleanItem)row.Tag;
-            row.SubItems[1].Text = "đang quét...";
+            row.SubItems[1].Text = L.T("scanning...", "đang quét...");
             it.Size = await Task.Run(() => Cleaner.Measure(it));
             row.SubItems[1].Text = Cleaner.Fmt(it.Size);
             if (row.Checked) total += it.Size;
         }
 
-        lblStatus.Text = "Đang tìm file lớn, trùng lặp, backup cũ...";
+        lblStatus.Text = L.T("Looking for large files, duplicates, old backups...", "Đang tìm file lớn, trùng lặp, backup cũ...");
         findings = await Task.Run(() => Analyzer.FindReview());
         FillReview();
 
-        lblStatus.Text = "Đang đánh giá thư mục lâu không dùng...";
+        lblStatus.Text = L.T("Rating long-unused folders...", "Đang đánh giá thư mục lâu không dùng...");
         var ratings = await Task.Run(() => Analyzer.RateFolders());
         stale.Items.Clear();
         foreach (var r in ratings)
         {
             var row = new ListViewItem(new[] { r.Path, Cleaner.Fmt(r.Size), r.LastUsed.ToString("dd/MM/yyyy"), r.Rating }) { Tag = r, ToolTipText = r.Path };
-            if (r.Days >= 365 || r.Files == 0) row.BackColor = Color.FromArgb(70, 32, 38);
-            else if (r.Ai || r.Days < 60) row.BackColor = Color.FromArgb(24, 58, 44);
+            if (r.Days >= 365 || r.Files == 0) row.BackColor = Theme.RowBad;
+            else if (r.Ai || r.Days < 60) row.BackColor = Theme.RowGood;
             stale.Items.Add(row);
         }
 
-        lblStatus.Text = "Đang đo các mục cần giữ...";
+        lblStatus.Text = L.T("Measuring items to keep...", "Đang đo các mục cần giữ...");
         foreach (ListViewItem row in keep.Items)
         {
             var k = (KeepItem)row.Tag;
@@ -710,8 +725,8 @@ partial class MainForm : Form
             row.SubItems[1].Text = Cleaner.Fmt(k.Size);
         }
 
-        SetBusy(false, "Quét xong.  Nhóm 1 dọn được " + Cleaner.Fmt(total) + ".  Nhóm 2: " + findings.Count + " mục, " +
-            Cleaner.Fmt(findings.Sum(f => f.Size)) + " – xem tab 2 và tự quyết.");
+        SetBusy(false, L.T("Scan complete.  Group 1 can free ", "Quét xong.  Nhóm 1 dọn được ") + Cleaner.Fmt(total) + L.T(".  Group 2: ", ".  Nhóm 2: ") + findings.Count + L.T(" items, ", " mục, ") +
+            Cleaner.Fmt(findings.Sum(f => f.Size)) + L.T(" – see tab 2 and decide.", " – xem tab 2 và tự quyết."));
         UpdateInfo();
     }
 
@@ -734,52 +749,53 @@ partial class MainForm : Form
         try { btnUpdate.Enabled = false; r = await Task.Run(() => Updater.Latest()); }
         catch (Exception ex)
         {
-            if (manual) MessageBox.Show("Không kiểm tra được cập nhật (cần kết nối Internet).\n" + ex.Message, Text);
+            if (manual) MessageBox.Show(L.T("Could not check for updates (Internet connection required).\n", "Không kiểm tra được cập nhật (cần kết nối Internet).\n") + ex.Message, Text);
             return;
         }
         finally { btnUpdate.Enabled = true; }
 
         if (r == null || r.Version <= Updater.Current)
         {
-            if (manual) MessageBox.Show("Bạn đang dùng phiên bản mới nhất (" + Updater.Current.ToString(3) + ").", Text);
+            if (manual) MessageBox.Show(L.T("You are on the latest version (", "Bạn đang dùng phiên bản mới nhất (") + Updater.Current.ToString(3) + ").", Text);
             return;
         }
-        btnUpdate.Text = "Cập nhật lên " + r.Tag;
+        btnUpdate.Text = L.T("Update to ", "Cập nhật lên ") + r.Tag;
+        btnUpdate.Visible = true; btnUpdate.ForeColor = Color.Black;
         btnUpdate.BackColor = Color.FromArgb(255, 193, 7);
         if (!manual) return;
 
-        string notes = string.IsNullOrWhiteSpace(r.Notes) ? "" : "\n\nCó gì mới:\n" + (r.Notes.Length > 600 ? r.Notes.Substring(0, 600) + "..." : r.Notes);
-        if (MessageBox.Show("Đã có phiên bản " + r.Tag + " (bạn đang dùng " + Updater.Current.ToString(3) + ")." + notes +
-            "\n\nCập nhật ngay? App sẽ tự đóng và mở lại.", Text, MessageBoxButtons.YesNo, MessageBoxIcon.Information) != DialogResult.Yes) return;
+        string notes = string.IsNullOrWhiteSpace(r.Notes) ? "" : L.T("\n\nWhat's new:\n", "\n\nCó gì mới:\n") + (r.Notes.Length > 600 ? r.Notes.Substring(0, 600) + "..." : r.Notes);
+        if (MessageBox.Show(L.T("Version ", "Đã có phiên bản ") + r.Tag + L.T(" is available (you have ", " (bạn đang dùng ") + Updater.Current.ToString(3) + ")." + notes +
+            L.T("\n\nUpdate now? The app will close and reopen.", "\n\nCập nhật ngay? App sẽ tự đóng và mở lại."), Text, MessageBoxButtons.YesNo, MessageBoxIcon.Information) != DialogResult.Yes) return;
         try
         {
-            SetBusy(true, "Đang tải bản " + r.Tag + "...");
+            SetBusy(true, L.T("Downloading ", "Đang tải bản ") + r.Tag + "...");
             btnUpdate.Enabled = false;
             await Task.Run(() => Updater.DownloadAndRestart(r));
             Application.Exit();
         }
         catch (Exception ex)
         {
-            SetBusy(false, "Cập nhật thất bại: " + ex.Message);
+            SetBusy(false, L.T("Update failed: ", "Cập nhật thất bại: ") + ex.Message);
             btnUpdate.Enabled = true;
         }
     }
 
     void OpenStale()
     {
-        if (stale.SelectedItems.Count == 0) { MessageBox.Show("Hãy bấm chọn một dòng trước.", Text); return; }
+        if (stale.SelectedItems.Count == 0) { MessageBox.Show(L.T("Select a row first.", "Hãy bấm chọn một dòng trước."), Text); return; }
         Process.Start("explorer.exe", "\"" + ((FolderRating)stale.SelectedItems[0].Tag).Path + "\"");
     }
 
     async Task RecycleStale()
     {
         var chosen = stale.Items.Cast<ListViewItem>().Where(r => r.Checked).Select(r => (FolderRating)r.Tag).ToList();
-        if (chosen.Count == 0) { MessageBox.Show("Hãy tích chọn thư mục ở tab 4 trước.", Text); return; }
+        if (chosen.Count == 0) { MessageBox.Show(L.T("Check some folders in the tab first.", "Hãy tích chọn thư mục ở tab 4 trước."), Text); return; }
         string list = string.Join("\n", chosen.Take(10).Select(c => "• " + c.Path)) + (chosen.Count > 10 ? "\n..." : "");
-        if (MessageBox.Show("Chuyển " + chosen.Count + " thư mục (" + Cleaner.Fmt(chosen.Sum(c => c.Size)) + ") vào Thùng rác?\n\n" + list +
-            "\n\nVẫn khôi phục lại được từ Thùng rác.", Text, MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+        if (MessageBox.Show(L.T("Move ", "Chuyển ") + chosen.Count + L.T(" folders (", " thư mục (") + Cleaner.Fmt(chosen.Sum(c => c.Size)) + L.T(") to the Recycle Bin?\n\n", ") vào Thùng rác?\n\n") + list +
+            L.T("\n\nYou can still restore them from the Recycle Bin.", "\n\nVẫn khôi phục lại được từ Thùng rác."), Text, MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
 
-        SetBusy(true, "Đang chuyển thư mục vào Thùng rác...");
+        SetBusy(true, L.T("Moving folders to the Recycle Bin...", "Đang chuyển thư mục vào Thùng rác..."));
         int ok = 0, fail = 0;
         foreach (var c in chosen)
         {
@@ -792,16 +808,16 @@ partial class MainForm : Form
             }
             catch { fail++; }
         }
-        Cleaner.Log("Chuyển thư mục vào Thùng rác: " + ok + " thư mục");
+        Cleaner.Log(L.T("Moved folders to Recycle Bin: ", "Chuyển thư mục vào Thùng rác: ") + ok + L.T(" folders", " thư mục"));
         foreach (var row in stale.Items.Cast<ListViewItem>().Where(r => r.Checked && !Directory.Exists(((FolderRating)r.Tag).Path)).ToList())
             stale.Items.Remove(row);
-        SetBusy(false, "Xong: " + ok + " thư mục" + (fail > 0 ? ", " + fail + " bị huỷ hoặc lỗi" : "") + ".");
+        SetBusy(false, L.T("Done: ", "Xong: ") + ok + L.T(" folders", " thư mục") + (fail > 0 ? ", " + fail + L.T(" cancelled or failed", " bị huỷ hoặc lỗi") : "") + ".");
         UpdateInfo();
     }
 
     void OpenLocation()
     {
-        if (review.SelectedItems.Count == 0) { MessageBox.Show("Hãy bấm chọn một dòng trước.", Text); return; }
+        if (review.SelectedItems.Count == 0) { MessageBox.Show(L.T("Select a row first.", "Hãy bấm chọn một dòng trước."), Text); return; }
         var f = (Finding)review.SelectedItems[0].Tag;
         Process.Start("explorer.exe", "/select,\"" + f.Path + "\"");
     }
@@ -809,28 +825,28 @@ partial class MainForm : Form
     async Task ReviewAction(bool moveToD)
     {
         var chosen = review.Items.Cast<ListViewItem>().Where(r => r.Checked).Select(r => (Finding)r.Tag).ToList();
-        if (chosen.Count == 0) { MessageBox.Show("Hãy tích chọn file ở tab 2 trước.", Text); return; }
+        if (chosen.Count == 0) { MessageBox.Show(L.T("Check some files in tab 2 first.", "Hãy tích chọn file ở tab 2 trước."), Text); return; }
         if (chosen.Any(f => f.IsFolder))
         {
-            MessageBox.Show("Windows.old cần xoá bằng Disk Cleanup:\nmở cleanmgr > Clean up system files > tích \"Previous Windows installation(s)\".", Text);
+            MessageBox.Show(L.T("Windows.old must be removed with Disk Cleanup:\nopen cleanmgr > Clean up system files > check \"Previous Windows installation(s)\".", "Windows.old cần xoá bằng Disk Cleanup:\nmở cleanmgr > Clean up system files > tích \"Previous Windows installation(s)\"."), Text);
             Process.Start("cleanmgr.exe");
             chosen = chosen.Where(f => !f.IsFolder).ToList();
             if (chosen.Count == 0) return;
         }
 
         string dest = @"D:\Lưu trữ từ ổ C";
-        if (moveToD && !Directory.Exists(@"D:\")) { MessageBox.Show("Không tìm thấy ổ D.", Text); return; }
+        if (moveToD && !Directory.Exists(@"D:\")) { MessageBox.Show(L.T("Drive D not found.", "Không tìm thấy ổ D."), Text); return; }
         if (moveToD)
         {
             chosen = chosen.Where(f => f.Path.StartsWith(@"C:\", StringComparison.OrdinalIgnoreCase)).ToList();
-            if (chosen.Count == 0) { MessageBox.Show("Chỉ chuyển được file đang nằm trên ổ C.", Text); return; }
+            if (chosen.Count == 0) { MessageBox.Show(L.T("Only files on drive C can be moved.", "Chỉ chuyển được file đang nằm trên ổ C."), Text); return; }
         }
         string q = moveToD
-            ? "Chuyển " + chosen.Count + " file (" + Cleaner.Fmt(chosen.Sum(f => f.Size)) + ") sang thư mục\n" + dest + " ?"
-            : "Chuyển " + chosen.Count + " file (" + Cleaner.Fmt(chosen.Sum(f => f.Size)) + ") vào Thùng rác?\nVẫn khôi phục lại được. Ổ C chỉ trống thêm khi Thùng rác được dọn.";
+            ? L.T("Move ", "Chuyển ") + chosen.Count + L.T(" files (", " file (") + Cleaner.Fmt(chosen.Sum(f => f.Size)) + L.T(") to folder\n", ") sang thư mục\n") + dest + " ?"
+            : L.T("Move ", "Chuyển ") + chosen.Count + L.T(" files (", " file (") + Cleaner.Fmt(chosen.Sum(f => f.Size)) + L.T(") to the Recycle Bin?\nYou can still restore them. Drive C only gains space once the Recycle Bin is emptied.", ") vào Thùng rác?\nVẫn khôi phục lại được. Ổ C chỉ trống thêm khi Thùng rác được dọn.");
         if (MessageBox.Show(q, Text, MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
 
-        SetBusy(true, moveToD ? "Đang chuyển sang ổ D..." : "Đang chuyển vào Thùng rác...");
+        SetBusy(true, moveToD ? L.T("Moving to drive D...", "Đang chuyển sang ổ D...") : L.T("Moving to the Recycle Bin...", "Đang chuyển vào Thùng rác..."));
         string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         int ok = 0, fail = 0;
         await Task.Run(() =>
@@ -856,31 +872,31 @@ partial class MainForm : Form
                 catch { fail++; }
             }
         });
-        Cleaner.Log((moveToD ? "Chuyển sang ổ D: " : "Chuyển vào Thùng rác: ") + ok + " file");
+        Cleaner.Log((moveToD ? L.T("Moved to drive D: ", "Chuyển sang ổ D: ") : L.T("Moved to Recycle Bin: ", "Chuyển vào Thùng rác: ")) + ok + " file");
         findings = findings.Where(f => File.Exists(f.Path) || f.IsFolder).ToList();
         FillReview();
-        SetBusy(false, "Xong: " + ok + " file" + (fail > 0 ? ", " + fail + " file lỗi (đang mở hoặc không có quyền)" : "") + ".");
+        SetBusy(false, L.T("Done: ", "Xong: ") + ok + " file" + (fail > 0 ? ", " + fail + L.T(" files failed (in use or no permission)", " file lỗi (đang mở hoặc không có quyền)") : "") + ".");
         UpdateInfo();
     }
 
     async Task CleanNow()
     {
         var chosen = Chosen();
-        if (chosen.Count == 0) { MessageBox.Show("Bạn chưa chọn mục nào.", Text); return; }
-        string warn = "Xoá vĩnh viễn các mục đã chọn?";
-        if (chosen.Any(c => c.Id == "recycle")) warn += "\n(Thùng rác sau khi xoá sẽ KHÔNG khôi phục lại được.)";
-        if (chosen.Any(c => c.Id == "chrome" || c.Id == "edge" || c.Id == "coccoc")) warn += "\nNên tắt trình duyệt trước để dọn được nhiều hơn.";
+        if (chosen.Count == 0) { MessageBox.Show(L.T("You haven't selected anything.", "Bạn chưa chọn mục nào."), Text); return; }
+        string warn = L.T("Permanently delete the selected items?", "Xoá vĩnh viễn các mục đã chọn?");
+        if (chosen.Any(c => c.Id == "recycle")) warn += L.T("\n(The emptied Recycle Bin can NOT be restored.)", "\n(Thùng rác sau khi xoá sẽ KHÔNG khôi phục lại được.)");
+        if (chosen.Any(c => c.Id == "chrome" || c.Id == "edge" || c.Id == "coccoc")) warn += L.T("\nClose your browsers first to clean more.", "\nNên tắt trình duyệt trước để dọn được nhiều hơn.");
         if (MessageBox.Show(warn, Text, MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
 
         long before = Cleaner.FreeC();
-        SetBusy(true, "Đang dọn dẹp...");
+        SetBusy(true, L.T("Cleaning...", "Đang dọn dẹp..."));
         int skipped = 0;
         foreach (var it in chosen) skipped += await Task.Run(() => Cleaner.Clean(it));
         long freed = Math.Max(0, Cleaner.FreeC() - before);
-        Cleaner.Log("Dọn thủ công: giải phóng " + Cleaner.Fmt(freed));
+        Cleaner.Log(L.T("Manual cleanup: freed ", "Dọn thủ công: giải phóng ") + Cleaner.Fmt(freed));
         await Scan();
-        lblStatus.Text = "Dọn xong! Đã giải phóng khoảng " + Cleaner.Fmt(freed) + "." +
-            (skipped > 0 ? "\n" + skipped + " file đang được phần mềm khác dùng nên được giữ lại (bình thường)." : "");
+        lblStatus.Text = L.T("Done! Freed about ", "Dọn xong! Đã giải phóng khoảng ") + Cleaner.Fmt(freed) + "." +
+            (skipped > 0 ? "\n" + skipped + L.T(" files are in use by other software and were kept (normal).", " file đang được phần mềm khác dùng nên được giữ lại (bình thường).") : "");
     }
 
     void SaveSettings()
@@ -897,16 +913,16 @@ partial class MainForm : Form
             if (settings.AutoEnabled)
             {
                 Scheduler.Enable(settings);
-                string when = settings.Frequency == 3 ? "mỗi khi bật máy (khoảng 30 giây sau khi đăng nhập)" : cboFreq.Text.ToLower() + " lúc " + settings.Time;
-                MessageBox.Show("Đã bật tự động dọn dẹp " + when + ".\nNếu đúng giờ đó máy đang tắt, app sẽ dọn ngay khi bạn bật máy lại.", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                string when = settings.Frequency == 3 ? L.T("at every startup (about 30 seconds after sign-in)", "mỗi khi bật máy (khoảng 30 giây sau khi đăng nhập)") : cboFreq.Text.ToLower() + L.T(" at ", " lúc ") + settings.Time;
+                MessageBox.Show(L.T("Automatic cleanup enabled ", "Đã bật tự động dọn dẹp ") + when + L.T(".\nIf the PC is off at that time, the app cleans as soon as you turn it back on.", ".\nNếu đúng giờ đó máy đang tắt, app sẽ dọn ngay khi bạn bật máy lại."), Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             else
             {
                 Scheduler.Disable();
-                MessageBox.Show("Đã lưu. Tự động dọn dẹp đang TẮT.", Text);
+                MessageBox.Show(L.T("Saved. Automatic cleanup is OFF.", "Đã lưu. Tự động dọn dẹp đang TẮT."), Text);
             }
         }
-        catch (Exception ex) { MessageBox.Show("Lỗi: " + ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Error); }
+        catch (Exception ex) { MessageBox.Show(L.T("Error: ", "Lỗi: ") + ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Error); }
     }
 
     // Chế độ chạy ngầm theo lịch: không mở cửa sổ, dọn xong hiện thông báo nhỏ góc màn hình
@@ -922,12 +938,12 @@ partial class MainForm : Form
             try { Cleaner.Clean(it); } catch { }
         }
         long freed = Math.Max(0, Cleaner.FreeC() - before);
-        Cleaner.Log("Tự động: giải phóng " + Cleaner.Fmt(freed));
+        Cleaner.Log(L.T("Automatic: freed ", "Tự động: giải phóng ") + Cleaner.Fmt(freed));
 
         if (!s.Notify) return;
         using (var tray = new NotifyIcon { Icon = SystemIcons.Information, Visible = true, Text = Cleaner.AppName })
         {
-            tray.ShowBalloonTip(8000, Cleaner.AppName, "Đã tự động dọn dẹp, giải phóng " + Cleaner.Fmt(freed) + ".\nỔ C còn trống " + Cleaner.Fmt(Cleaner.FreeC()) + ".", ToolTipIcon.Info);
+            tray.ShowBalloonTip(8000, Cleaner.AppName, L.T("Cleaned up automatically, freed ", "Đã tự động dọn dẹp, giải phóng ") + Cleaner.Fmt(freed) + L.T(".\nDrive C has free: ", ".\nỔ C còn trống ") + Cleaner.Fmt(Cleaner.FreeC()) + ".", ToolTipIcon.Info);
             var end = DateTime.Now.AddSeconds(8);
             while (DateTime.Now < end) { Application.DoEvents(); System.Threading.Thread.Sleep(100); }
             tray.Visible = false;
@@ -937,13 +953,13 @@ partial class MainForm : Form
     static void WriteReport(string file)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("== 1. XOÁ AN TOÀN (app tự dọn)");
+        sb.AppendLine(L.T("== 1. SAFE TO DELETE (the app cleans these)", "== 1. XOÁ AN TOÀN (app tự dọn)"));
         foreach (var it in Cleaner.AllItems()) sb.AppendLine(Cleaner.Fmt(Cleaner.Measure(it)).PadLeft(10) + "  " + it.Name);
-        sb.AppendLine().AppendLine("== 2. CẦN BẠN XEM XÉT");
+        sb.AppendLine().AppendLine(L.T("== 2. NEEDS YOUR REVIEW", "== 2. CẦN BẠN XEM XÉT"));
         foreach (var f in Analyzer.FindReview()) sb.AppendLine(Cleaner.Fmt(f.Size).PadLeft(10) + "  " + f.Path + "  ->  " + f.Reason);
-        sb.AppendLine().AppendLine("== 4. THƯ MỤC LÂU KHÔNG DÙNG");
+        sb.AppendLine().AppendLine(L.T("== 4. LONG-UNUSED FOLDERS", "== 4. THƯ MỤC LÂU KHÔNG DÙNG"));
         foreach (var r in Analyzer.RateFolders()) sb.AppendLine(Cleaner.Fmt(r.Size).PadLeft(10) + "  " + r.LastUsed.ToString("dd/MM/yyyy") + "  " + r.Path + "  ->  " + r.Rating);
-        sb.AppendLine().AppendLine("== 3. CẦN GIỮ");
+        sb.AppendLine().AppendLine(L.T("== 3. KEEP", "== 3. CẦN GIỮ"));
         foreach (var k in Analyzer.KeepItems()) sb.AppendLine(Cleaner.Fmt(k.Paths.Sum(p => Analyzer.MeasurePath(p))).PadLeft(10) + "  " + k.Name + "  ->  " + k.Why);
         File.WriteAllText(file, sb.ToString(), Encoding.UTF8);
     }
@@ -963,20 +979,22 @@ partial class MainForm : Form
         if (args.Any(a => a.Equals("/serve", StringComparison.OrdinalIgnoreCase))) { PowerStation.Serve(); return; }
         // Sao lưu / khôi phục bộ não bằng dòng lệnh, in kết quả ra stdout:
         //   /backup-setup <repo> <mật khẩu>   /backup   /backup-verify   /restore <repo> <mật khẩu hoặc mã khôi phục>
-        if (args.Length > 0 && new[] { "/backup-setup", "/backup", "/backup-verify", "/restore" }.Contains(args[0].ToLowerInvariant()))
+        if (args.Length > 0 && new[] { "/backup-prepare", "/backup-setup", "/backup", "/backup-verify", "/restore", "/backup-plain" }.Contains(args[0].ToLowerInvariant()))
         {
             using (var o = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false)) { AutoFlush = true })
                 try
                 {
                     switch (args[0].ToLowerInvariant())
                     {
-                        case "/backup-setup": o.WriteLine("MÃ KHÔI PHỤC (chép lại, chỉ hiện một lần): " + Backup.Setup(args[1], args[2])); break;
+                        case "/backup-prepare": Backup.PrepareRepo(args.Length > 1 ? args[1] : "bentar-second-brain-backup", o.WriteLine); break;
+                        case "/backup-setup": { var c = Backup.Setup(args[1], args.Length > 2 ? args[2] : null); o.WriteLine(c == null ? L.T("Backed up (not encrypted).", "Đã sao lưu (không mã hoá).") : L.T("RECOVERY CODE (write it down, shown only once): ", "MÃ KHÔI PHỤC (chép lại, chỉ hiện một lần): ") + c); break; }
                         case "/backup": o.WriteLine(Backup.Run(true)); break;
                         case "/backup-verify": o.WriteLine(Backup.Verify()); break;
-                        case "/restore": o.WriteLine(Backup.Restore(args[1], args[2])); break;
+                        case "/restore": o.WriteLine(Backup.Restore(args[1], args.Length > 2 ? args[2] : null)); break;
+                        case "/backup-plain": o.WriteLine(Backup.DisableEncryption()); break;
                     }
                 }
-                catch (Exception ex) { o.WriteLine("Lỗi: " + ex.Message); Environment.Exit(1); }
+                catch (Exception ex) { o.WriteLine(L.T("Error: ", "Lỗi: ") + ex.Message); Environment.Exit(1); }
             return;
         }
         // /install: cài vào máy (lối tắt, Settings → Apps); /uninstall [/quiet]: gỡ, giữ nguyên dữ liệu người dùng
@@ -988,8 +1006,8 @@ partial class MainForm : Form
         {
             using (var o = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false)) { AutoFlush = true })
             {
-                try { if (!Installer.IsInstalled) Installer.Install(); o.WriteLine("App đã cài: " + Installer.Exe); }
-                catch (Exception ex) { o.WriteLine("Lỗi cài app: " + ex.Message); Environment.Exit(1); }
+                try { if (!Installer.IsInstalled) Installer.Install(); o.WriteLine(L.T("App installed: ", "App đã cài: ") + Installer.Exe); }
+                catch (Exception ex) { o.WriteLine(L.T("Install error: ", "Lỗi cài app: ") + ex.Message); Environment.Exit(1); }
                 foreach (var l in AgentLinks.ConnectAll(false)) o.WriteLine(l);
             }
             return;
@@ -1004,7 +1022,7 @@ partial class MainForm : Form
         if (Installer.OfferOnStart()) return;   // đã chuyển sang mở bản vừa cài
         Installer.RefreshRegistration();
         Installer.CleanupOld();
-        PowerStation.EnsureRunning(Installer.IsInstalled ? Installer.Exe : Application.ExecutablePath);
+        if (L.On("station", true)) PowerStation.EnsureRunning(Installer.IsInstalled ? Installer.Exe : Application.ExecutablePath);
         Application.Run(new MainForm());
     }
 }

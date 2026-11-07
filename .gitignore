@@ -1,3 +1,4 @@
 ﻿*.exe
 src/app-preview.png
 *.old
+dist/

@@ -168,7 +168,7 @@ static class PowerStation
         // Giữ chỉ mục luôn mới khi trạm đang chạy
         var refresh = new Timer(_ => { try { Brain.RefreshIfStale(TimeSpan.FromMinutes(30)); } catch { } }, null, TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(10));
         // Giữ bộ não cả đời: sao lưu khi trí nhớ thay đổi, tự kiểm tra bản sao lưu mỗi tuần
-        var backup = new Timer(_ => { try { Backup.Tick(); } catch { } }, null, TimeSpan.FromMinutes(2), TimeSpan.FromMinutes(10));
+        var backup = new Timer(_ => { try { if (L.On("autobackup", true)) Backup.Tick(); } catch { } }, null, TimeSpan.FromMinutes(2), TimeSpan.FromMinutes(10));
         GC.KeepAlive(backup);
         while (true)
         {
@@ -188,6 +188,36 @@ static class PowerStation
             System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(exe, "/serve") { UseShellExecute = false, CreateNoWindow = true });
         }
         catch { }
+    }
+
+    // Tắt trạm phát đang chạy (gọi vào chính nó, kèm mã khoá)
+    public static void Stop()
+    {
+        if (!IsRunning()) return;
+        try
+        {
+            using (var wc = new WebClient())
+            {
+                wc.Headers["Authorization"] = "Bearer " + Token;
+                wc.Headers["X-Client-Name"] = "Bentar Second Brain";
+                wc.UploadString(BaseUrl + "/api/shutdown", "POST", "");
+            }
+        }
+        catch { }
+        for (int i = 0; i < 20 && IsRunning(); i++) System.Threading.Thread.Sleep(150);
+    }
+
+    // Tạo mã khoá mới: mọi công cụ dùng mã cũ sẽ bị từ chối. Khởi động lại trạm để nhận mã mới.
+    public static void NewToken(string exe)
+    {
+        bool was = IsRunning();
+        if (was) Stop();
+        Token = null; LoadConfig();
+        var b = new byte[24];
+        using (var rng = System.Security.Cryptography.RandomNumberGenerator.Create()) rng.GetBytes(b);
+        Token = "sb_" + BitConverter.ToString(b).Replace("-", "").ToLowerInvariant();
+        SaveConfig();
+        if (was) EnsureRunning(exe);
     }
 
     // ---------- HTTP tối giản ----------
@@ -282,7 +312,7 @@ static class PowerStation
                 string host;
                 r.Headers.TryGetValue("Host", out host);
                 var h = (host ?? "").ToLowerInvariant();
-                if (!(h.StartsWith("127.0.0.1") || h.StartsWith("localhost") || h.StartsWith("[::1]"))) { Write(ns, 403, "text/plain", "Chỉ nhận kết nối trên máy này."); return; }
+                if (!(h.StartsWith("127.0.0.1") || h.StartsWith("localhost") || h.StartsWith("[::1]"))) { Write(ns, 403, "text/plain", L.T("Only local connections are accepted.", "Chỉ nhận kết nối trên máy này.")); return; }
 
                 if (r.Path == "/" && r.Method == "GET") { Write(ns, 200, "text/plain", Help()); return; }
                 if (r.Path == "/openapi.json") { Write(ns, 200, "application/json", OpenApi()); return; }
@@ -291,7 +321,7 @@ static class PowerStation
                 if (r.Headers.TryGetValue("Authorization", out auth) && auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)) token = auth.Substring(7).Trim();
                 else if (r.Headers.TryGetValue("X-Brain-Token", out tok)) token = tok;
                 else if (q.ContainsKey("token")) token = q["token"];
-                if (token != Token) { Write(ns, 401, "application/json", "{\"error\":\"Thiếu hoặc sai mã khoá. Lấy mã ở trang Ổ cắm của Bentar Second Brain.\"}"); return; }
+                if (token != Token) { Write(ns, 401, "application/json", L.T("{\"error\":\"Missing or wrong key. Get it from the Sockets page in Bentar Second Brain.\"}", "{\"error\":\"Thiếu hoặc sai mã khoá. Lấy mã ở trang Ổ cắm của Bentar Second Brain.\"}")); return; }
 
                 string ua, named;
                 r.Headers.TryGetValue("User-Agent", out ua);
@@ -299,7 +329,7 @@ static class PowerStation
 
                 if (r.Path == "/mcp")
                 {
-                    if (r.Method != "POST") { Write(ns, 405, "application/json", "{\"error\":\"Dùng POST\"}", new Dictionary<string, string> { { "Allow", "POST" } }); return; }
+                    if (r.Method != "POST") { Write(ns, 405, "application/json", L.T("{\"error\":\"Use POST\"}", "{\"error\":\"Dùng POST\"}"), new Dictionary<string, string> { { "Allow", "POST" } }); return; }
                     string sid; r.Headers.TryGetValue("Mcp-Session-Id", out sid);
                     string known;
                     if (sid != null && sessions.TryGetValue(sid, out known)) client = known;
@@ -324,6 +354,13 @@ static class PowerStation
                     return;
                 }
 
+                if (r.Path == "/api/shutdown" && r.Method == "POST")
+                {
+                    Write(ns, 200, "application/json", "{\"ok\":true}");
+                    Activity.Log(client, "http", "tắt", BaseUrl);
+                    Task.Run(() => { System.Threading.Thread.Sleep(200); Environment.Exit(0); });
+                    return;
+                }
                 if (r.Path == "/api/status")
                 {
                     var mc = Memory.Counts();
@@ -338,7 +375,7 @@ static class PowerStation
                 if (r.Path.StartsWith("/api/"))
                 {
                     string tool = r.Path.Substring(5);
-                    if (!McpServer.Tools().OfType<Dictionary<string, object>>().Any(t => (string)t["name"] == tool)) { Write(ns, 404, "application/json", "{\"error\":\"Không có công cụ " + tool + "\"}"); return; }
+                    if (!McpServer.Tools().OfType<Dictionary<string, object>>().Any(t => (string)t["name"] == tool)) { Write(ns, 404, "application/json", L.T("{\"error\":\"No such tool: ", "{\"error\":\"Không có công cụ ") + tool + "\"}"); return; }
                     var args = new Dictionary<string, object>();
                     foreach (var kv in q) if (kv.Key != "token" && kv.Key != "client") args[kv.Key] = kv.Value == "true" ? (object)true : kv.Value == "false" ? (object)false : kv.Value;
                     if (r.Body.Length > 0)
@@ -351,7 +388,7 @@ static class PowerStation
                     Write(ns, isError ? 400 : 200, "application/json", Json.Serialize(new Dictionary<string, object> { { "ok", !isError }, { "text", text } }));
                     return;
                 }
-                Write(ns, 404, "application/json", "{\"error\":\"Không có đường dẫn này. Xem GET / để biết cách dùng.\"}");
+                Write(ns, 404, "application/json", L.T("{\"error\":\"Unknown path. See GET / for usage.\"}", "{\"error\":\"Không có đường dẫn này. Xem GET / để biết cách dùng.\"}"));
             }
             catch (Exception ex)
             {
@@ -362,15 +399,15 @@ static class PowerStation
 
     static string Help()
     {
-        return "Bentar Second Brain – trạm phát\n\n" +
-               "Một bộ não, mọi agent và công cụ cắm vào. Mọi yêu cầu (trừ trang này và /openapi.json) cần mã khoá:\n" +
-               "  Authorization: Bearer <mã>   hoặc   X-Brain-Token: <mã>   hoặc   ?token=<mã>\n" +
-               "Đặt tên thiết bị: header X-Client-Name: <tên>  hoặc  ?client=<tên>\n\n" +
+        return L.T("Bentar Second Brain – station\n\n", "Bentar Second Brain – trạm phát\n\n") +
+               L.T("One brain that every agent and tool plugs into. Every request (except this page and /openapi.json) needs the key:\n", "Một bộ não, mọi agent và công cụ cắm vào. Mọi yêu cầu (trừ trang này và /openapi.json) cần mã khoá:\n") +
+               L.T("  Authorization: Bearer <key>   or   X-Brain-Token: <key>   or   ?token=<key>\n", "  Authorization: Bearer <mã>   hoặc   X-Brain-Token: <mã>   hoặc   ?token=<mã>\n") +
+               L.T("Name your device: header X-Client-Name: <name>  or  ?client=<name>\n\n", "Đặt tên thiết bị: header X-Client-Name: <tên>  hoặc  ?client=<tên>\n\n") +
                "  POST /mcp                MCP qua HTTP (JSON-RPC)\n" +
-               "  GET|POST /api/<công cụ>  gọi công cụ, ví dụ /api/search?query=..., /api/recall, /api/remember\n" +
-               "  GET /api/tools           danh sách công cụ\n" +
-               "  GET /api/status          trạng thái bộ não và các thiết bị đã cắm\n" +
-               "  GET /openapi.json        mô tả OpenAPI cho mọi công cụ\n";
+               L.T("  GET|POST /api/<tool>     call a tool, e.g. /api/search?query=..., /api/recall, /api/remember\n", "  GET|POST /api/<công cụ>  gọi công cụ, ví dụ /api/search?query=..., /api/recall, /api/remember\n") +
+               L.T("  GET /api/tools           list tools\n", "  GET /api/tools           danh sách công cụ\n") +
+               L.T("  GET /api/status          brain status and plugged-in devices\n", "  GET /api/status          trạng thái bộ não và các thiết bị đã cắm\n") +
+               L.T("  GET /openapi.json        OpenAPI spec for all tools\n", "  GET /openapi.json        mô tả OpenAPI cho mọi công cụ\n");
     }
 
     // Mô tả OpenAPI sinh từ chính danh sách công cụ (thêm công cụ là tự có trong mô tả)
@@ -384,11 +421,11 @@ static class PowerStation
                 { "post", new Dictionary<string, object> {
                     { "operationId", t["name"] }, { "summary", t["description"] },
                     { "requestBody", new Dictionary<string, object> { { "required", true }, { "content", new Dictionary<string, object> { { "application/json", new Dictionary<string, object> { { "schema", schema } } } } } } },
-                    { "responses", new Dictionary<string, object> { { "200", new Dictionary<string, object> { { "description", "Kết quả dạng văn bản trong trường text" } } } } } } } };
+                    { "responses", new Dictionary<string, object> { { "200", new Dictionary<string, object> { { "description", L.T("Text result in the text field", "Kết quả dạng văn bản trong trường text") } } } } } } } };
         }
         return Json.Serialize(new Dictionary<string, object> {
             { "openapi", "3.0.3" },
-            { "info", new Dictionary<string, object> { { "title", "Bentar Second Brain" }, { "version", Updater.Current.ToString(3) }, { "description", "Bộ não thứ hai dùng chung cho mọi agent và công cụ trên máy này." } } },
+            { "info", new Dictionary<string, object> { { "title", "Bentar Second Brain" }, { "version", Updater.Current.ToString(3) }, { "description", L.T("A second brain shared by every agent and tool on this PC.", "Bộ não thứ hai dùng chung cho mọi agent và công cụ trên máy này.") } } },
             { "servers", new object[] { new Dictionary<string, object> { { "url", BaseUrl } } } },
             { "components", new Dictionary<string, object> { { "securitySchemes", new Dictionary<string, object> { { "bearer", new Dictionary<string, object> { { "type", "http" }, { "scheme", "bearer" } } } } } } },
             { "security", new object[] { new Dictionary<string, object> { { "bearer", new object[0] } } } },

@@ -1,106 +1,115 @@
 # Bentar Second Brain
 
-App dọn dẹp máy tính Windows. App quét các ổ đĩa và chia kết quả thành 4 nhóm:
+A Windows app that gives your PC and every AI agent on it one shared, local **second brain** (file search + long-term memory over MCP), together with safe PC cleanup and private GitHub backup.
 
-1. **Xoá an toàn**: Thùng rác, file tạm, cache trình duyệt (Chrome, Edge, Cốc Cốc), npm-cache, crash dump. App tự dọn, có thể đặt lịch dọn mỗi khi bật máy.
-2. **Cần bạn xem xét**: file lớn, file trùng lặp, bản backup cũ, file cài đặt. Bạn tự chọn chuyển vào Thùng rác hoặc chuyển sang ổ D.
-3. **Cần giữ**: Windows, phần mềm, hồ sơ trình duyệt, tài liệu cá nhân. App không bao giờ đụng tới.
-4. **Thư mục lâu không dùng**: đánh giá từng thư mục theo lần sửa file gần nhất, lịch sử mở file của Windows và dấu vết công cụ AI. Bạn tự tích để xoá.
+## PC cleanup
 
-## Biên dịch
+The app scans your drives and sorts the results into 4 groups:
 
-App không cần cài thêm gì, chỉ dùng trình biên dịch C# có sẵn trong Windows (.NET Framework 4.x):
+1. **Safe to delete**: Recycle Bin, temp files, browser caches (Chrome, Edge, Cốc Cốc), npm-cache, crash dumps. The app cleans these itself and can be scheduled to run at every startup.
+2. **Needs your review**: large files, duplicates, old backups, installers. You choose to move them to the Recycle Bin or to drive D.
+3. **Keep**: Windows, installed software, browser profiles, personal documents. The app never touches these.
+4. **Unused folders**: each folder is rated by its latest file change, Windows recent-file history and traces left by AI tools. You tick what to delete.
+
+## Language and theme
+
+The app starts in English with a dark theme. Open **Settings** (left sidebar) to switch to **Vietnamese** and/or the **Light** theme, click **Apply**, and the app restarts. The choice is saved in `%LOCALAPPDATA%\BentarSecondBrain\ui.ini` and also applies to the MCP server / power station (messages returned to agents follow the chosen language). The 3D brain map always keeps its night-sky background.
+
+## Build
+
+Nothing to install: it uses the C# compiler that ships with Windows (.NET Framework 4.x):
 
 ```powershell
 & C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /nologo /target:winexe /codepage:65001 /optimize /win32icon:src\app.ico "/out:Bentar Second Brain.exe" /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Core.dll /r:Microsoft.VisualBasic.dll /r:System.Web.Extensions.dll /r:System.IO.Compression.dll /r:System.Security.dll src\*.cs
 ```
 
-## Cài đặt và gỡ cài đặt
+## Install and uninstall
 
-Lần đầu mở file `.exe`, app hỏi có cài vào máy không (không cần quyền Admin). Khi cài, app chép vào `%LOCALAPPDATA%\Programs\Bentar Second Brain`, tạo lối tắt ở Start Menu và Desktop, và hiện trong **Settings → Apps**. Lịch dọn tự động và các agent đều dùng bản đã cài này.
+The first time you open the `.exe`, the app asks whether to install it (no admin rights needed). It copies itself to `%LOCALAPPDATA%\Programs\Bentar Second Brain`, creates Start Menu and Desktop shortcuts, and appears in **Settings → Apps**. Scheduled cleanup and all agents use this installed copy.
 
-Gỡ trong **Settings → Apps** (hoặc chạy `"Bentar Second Brain.exe" /uninstall`). App chỉ xoá những gì nó đã cài: file chương trình, lối tắt, lịch tự động và mục `second-brain` trong cấu hình các agent. **File, tài liệu, dự án của người dùng không bao giờ bị đụng tới**; cài đặt, nhật ký và chỉ mục được giữ lại ở `%LOCALAPPDATA%\BentarSecondBrain`.
+Uninstall from **Settings → Apps** (or run `"Bentar Second Brain.exe" /uninstall`). The app removes only what it installed: program files, shortcuts, scheduled tasks and the `second-brain` entry in agent configs. **Your files, documents and projects are never touched**; settings, logs and the index are kept in `%LOCALAPPDATA%\BentarSecondBrain`.
 
-## Cập nhật
+## Updates
 
-Bấm nút **Kiểm tra cập nhật** trong app. App sẽ đọc bản phát hành mới nhất trên GitHub Releases của repo này. Nếu có bản mới hơn, app tải file `.exe`, tự đóng, thay file cũ rồi mở lại. Mỗi lần mở, app cũng tự kiểm tra lặng lẽ: nếu có bản mới, nút sẽ chuyển sang màu vàng.
+Click **Check for updates** in the app. It reads the latest release from this repo's GitHub Releases; if a newer one exists, it downloads it, closes, replaces the old file and reopens. On every launch it also checks quietly and turns the button yellow when an update is available.
 
-Cách phát hành một phiên bản mới:
+Publishing a new version:
 
-1. Tăng số trong `AssemblyVersion` ở đầu file `src/BentarSecondBrain.cs`, ví dụ `2.3.0.0`.
-2. Biên dịch lại theo lệnh ở mục trên.
-3. Tạo bản phát hành có tag khớp với số phiên bản, và đính kèm file `.exe`:
+1. Bump `AssemblyVersion` at the top of `src/BentarSecondBrain.cs`, e.g. `2.10.0.0`.
+2. Run the release script, which builds, zips and publishes to GitHub Releases:
 
 ```powershell
-gh release create v2.3.0 "Bentar Second Brain.exe" --title "v2.3.0" --notes "Có gì mới..."
+.\release.ps1 -Version 2.10.0 -Title "Short title" -Notes "What's new..."
 ```
 
-## Second Brain cho agent
+## Second Brain for agents
 
-App lập chỉ mục mọi ổ trên máy (ổ cứng, USB, thẻ nhớ): tên file và nội dung file chữ, mã nguồn, Word (.docx). Tìm không phân biệt dấu tiếng Việt. Khi USB/thẻ nhớ được rút ra, chỉ mục vẫn giữ những gì nó từng có.
+The app indexes every drive on the machine (hard drives, USB sticks, memory cards): file names and the contents of text files, source code and Word (.docx) documents. Search ignores Vietnamese accents. When a USB stick or card is removed, the index keeps what it already knew.
 
-Agent ở bất kỳ dự án nào cũng tra cứu được qua máy chủ MCP (`BentarSecondBrain.exe /mcp`). Bấm **Kết nối các agent** ở tab "5. Second Brain" (hoặc chạy `BentarSecondBrain.exe /connect`). App tự cắm Second Brain vào mọi agent có trên máy: Claude Code, Claude Desktop, Cursor, Windsurf, Codex, Gemini CLI. File cấu hình cũ được sao lưu thành `*.bak-secondbrain`. Claude Desktop phải được thoát hẳn trước khi kết nối, vì khi đang mở nó tự ghi đè file cấu hình. Với riêng Claude Code, có thể chạy tay:
+Agents in any project can query it through the MCP server (`BentarSecondBrain.exe /mcp`). Click **Connect agents** on the Second Brain tab (or run `BentarSecondBrain.exe /connect`). The app plugs Second Brain into every agent it finds: Claude Code, Claude Desktop, Cursor, Windsurf, Codex, Gemini CLI. Old config files are backed up as `*.bak-secondbrain`. Quit Claude Desktop completely before connecting, since it overwrites its config while running. For Claude Code you can also do it manually:
 
 ```powershell
 claude mcp add --scope user second-brain -- "$env:LOCALAPPDATA\Programs\Bentar Second Brain\Bentar Second Brain.exe" /mcp
 ```
 
-Các công cụ agent dùng được: `search`, `list_projects`, `project_overview`, `read_file`, `list_dir`, `copy`, `index_status`, và các công cụ trí nhớ `recall`, `remember`, `revise_memory`, `connect`.
+Tools available to agents: `search`, `list_projects`, `project_overview`, `read_file`, `list_dir`, `copy`, `index_status`, plus the memory tools `recall`, `remember`, `revise_memory`, `connect`.
 
-### Trí nhớ: tự học, tự nhớ như bộ não
+### Memory that learns like a brain
 
-Second Brain là trí nhớ dài hạn dùng chung cho mọi agent, lưu ở `%LOCALAPPDATA%\BentarSecondBrain\tri-nho.json` (không đụng file của người dùng):
+Second Brain is long-term memory shared by all agents, stored in `%LOCALAPPDATA%\BentarSecondBrain\tri-nho.json` (your files are never touched):
 
-- **Nơ-ron**: mỗi ghi nhớ (quyết định, bài học, sự thật, việc cần làm, ghi chú), mỗi dự án và mỗi file từng được dùng.
-- **Khớp thần kinh**: liên kết có độ mạnh. Ghi nhớ mới tự nối với dự án/file nguồn và các ghi nhớ gần nghĩa.
-- **Tự học**: agent đọc file, chép tài liệu, dùng nhiều dự án trong cùng phiên, hay cùng nhớ lại các ý, thì các liên kết tương ứng mạnh lên.
-- **Phai dần, không xoá**: ghi nhớ và liên kết lâu không dùng mờ dần (chu kỳ bán rã 90–120 ngày); ghi nhớ đánh dấu đã cũ được giữ lại nhưng xếp sau.
-- **Nhớ lại có liên tưởng**: `recall` trả về ghi nhớ khớp và lan sang các ý nối với chúng; `search` và `project_overview` cũng kèm ghi nhớ liên quan.
-- Ghi nhớ gần trùng được củng cố thay vì nhân bản; bản cũ giữ trong lịch sử.
+- **Neurons**: every memory (decision, lesson, fact, todo, note), every project and every file that has been used.
+- **Synapses**: weighted links. A new memory links itself to its source project/file and to related memories.
+- **Self-learning**: when agents read files, copy documents, use several projects in one session, or recall ideas together, those links get stronger.
+- **Fades, never deleted**: unused memories and links slowly fade (90–120 day half-life); memories marked outdated are kept but ranked lower.
+- **Associative recall**: `recall` returns matching memories and spreads to connected ideas; `search` and `project_overview` also include related memories.
+- Near-duplicate memories reinforce the existing one instead of duplicating it; old versions stay in history.
 
-### Bản đồ bộ não
+### Brain map
 
-Tab **Bộ não** (mở đầu tiên) vẽ đúng các nơ-ron và khớp thần kinh trong trí nhớ:
+The **Brain** tab (opened first) draws the actual neurons and synapses in memory:
 
-- Bộ não 3D là đám mây hạt sáng nối thành lưới, xoay và lắc nhẹ trong không gian, có phối cảnh gần xa; mạng lưới sao phía sau xoay chậm hơn. Kéo chuột để xoay, lăn chuột để phóng to. Ghi nhớ của agent nằm ở thuỳ trán, màu theo loại (quyết định, bài học, sự thật...); dự án ở thuỳ đỉnh, file ở thuỳ thái dương.
-- Nơ-ron to và sáng theo mức được dùng, mờ dần khi lâu không dùng; đường nối dày theo độ mạnh khớp thần kinh, nét chấm là các dự án chung thư mục.
-- Xung điện chạy dọc đường nối; khi agent thật sự nhớ lại, đọc hay ghi, nơ-ron đó loé sáng và xung lan sang các ý liên quan.
-- Gõ từ khoá rồi Enter để làm sáng các ý khớp và mở thẻ thông tin của ý khớp nhất; nhấp một nơ-ron để xem, nhấp đúp để mở vị trí trong Explorer.
+- The 3D brain is a cloud of glowing particles joined into a mesh, gently rotating with perspective; a star network behind it turns more slowly. Drag to rotate, scroll to zoom. Agent memories sit in the frontal lobe, colored by type (decision, lesson, fact...); projects in the parietal lobe, files in the temporal lobe.
+- Neurons grow bigger and brighter with use and dim when idle; link thickness follows synapse strength, dotted lines join projects in the same folder.
+- Pulses travel along links; when an agent actually recalls, reads or writes, that neuron flashes and the pulse spreads to related ideas.
+- Type a keyword and press Enter to highlight matches and open the best match's card; click a neuron to inspect it, double-click to reveal it in Explorer.
 
-Second Brain **không bao giờ sửa hay xoá file**. `copy` chỉ tạo bản sao mới và từ chối ghi đè. Bỏ qua khi lập chỉ mục: thư mục hệ thống, AppData, `node_modules`, `.git`, môi trường ảo, và nội dung file bí mật (`.env`, khoá, credentials).
+Second Brain **never edits or deletes files**. `copy` only creates a new copy and refuses to overwrite. Skipped when indexing: system folders, AppData, `node_modules`, `.git`, virtual environments, and the contents of secret files (`.env`, keys, credentials).
 
-Chỉ mục tự cập nhật ngầm khi agent tra cứu (nếu đã cũ hơn 30 phút), hoặc bấm **Cập nhật chỉ mục**, hoặc chạy `BentarSecondBrain.exe /index`.
+The index refreshes in the background when an agent queries it (if older than 30 minutes), or click **Update index**, or run `BentarSecondBrain.exe /index`.
 
-## Trạm phát: một bộ não, mọi agent cắm vào
+## Power station: one brain, every agent plugs in
 
-Second Brain là nguồn điện, các agent và công cụ là bóng đèn. Sau khi cài, trạm phát (`BentarSecondBrain.exe /serve`) tự chạy ngầm khi bật máy và mở ba kiểu ổ cắm dùng chung một bộ não:
+Second Brain is the power source; agents and tools are the light bulbs. Once installed, the power station (`BentarSecondBrain.exe /serve`) starts in the background at boot and offers three kinds of sockets to the same brain:
 
-| Ổ cắm | Dành cho | Địa chỉ |
+| Socket | For | Address |
 |---|---|---|
 | MCP stdio | Claude Code, Codex, Gemini CLI, Cursor... | `"Bentar Second Brain.exe" /mcp` |
-| MCP qua HTTP | Agent hỗ trợ MCP từ xa | `POST http://127.0.0.1:7801/mcp` |
-| REST + OpenAPI | n8n, script, tiện ích trình duyệt, agent tự xây | `GET/POST http://127.0.0.1:7801/api/<công cụ>`, mô tả ở `/openapi.json` |
+| MCP over HTTP | Agents that support remote MCP | `POST http://127.0.0.1:7801/mcp` |
+| REST + OpenAPI | n8n, scripts, browser extensions, custom agents | `GET/POST http://127.0.0.1:7801/api/<tool>`, described at `/openapi.json` |
 
-Ổ cắm HTTP chỉ nghe trên máy này, mỗi yêu cầu cần mã khoá (`Authorization: Bearer <mã>`), lấy trong `%LOCALAPPDATA%\BentarSecondBrain\o-cam.json`; tên miền lạ trỏ về máy bị chặn. Đặt tên thiết bị bằng header `X-Client-Name`. Mọi lần cắm và dùng được ghi vào `hoat-dong.jsonl`.
+HTTP sockets listen on this machine only. Every request needs a token (`Authorization: Bearer <token>`) found in `%LOCALAPPDATA%\BentarSecondBrain\o-cam.json`; foreign host names pointing at the machine are blocked. Name a device with the `X-Client-Name` header. Every connection and call is logged to `hoat-dong.jsonl`.
 
-## Giữ bộ não cả đời: sao lưu lên GitHub riêng tư
+## Keep your brain for life: private GitHub backup
 
-Lần đầu mở app, app hỏi: khôi phục bộ não cũ, tạo mới và sao lưu lên GitHub, hay để sau (app sẽ báo đỏ cho tới khi sao lưu).
+On first launch the app asks: restore an existing brain, create a new one and back it up to GitHub, or decide later (the app shows a red warning until a backup exists).
 
-- Bộ não được sao lưu vào một repo GitHub riêng tư; mỗi lần sao lưu là một commit, nên giữ được mọi phiên bản cả đời.
-- Chỉ có dữ liệu đã mã hoá rời khỏi máy: `bo-nao.sbak` (trí nhớ JSON + bản Markdown đọc được), mã hoá bằng mã khôi phục; `khoa.enc` là mã khôi phục, mã hoá bằng mật khẩu của bạn. Chỉ cần mật khẩu hoặc mã khôi phục là mở được; mất cả hai thì không ai mở được.
-- Định dạng chuẩn OpenSSL nên không cần app vẫn mở được: `openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -md sha256 -in bo-nao.sbak -out bo-nao.zip -pass pass:"MÃ-KHÔI-PHỤC"`.
-- Trạm phát tự sao lưu khi trí nhớ thay đổi (kiểm tra 10 phút một lần) và mỗi tuần tự mở thử bản sao lưu; lỗi hoặc quá 3 ngày chưa sao lưu thì app báo đỏ.
-- Đổi máy / mất máy: cài app, chọn **Khôi phục**, đăng nhập GitHub, chọn repo có dấu ★, nhập mật khẩu hoặc mã khôi phục. Chỉ mục file sẽ tự quét lại trên máy mới.
+- The brain is backed up to a private GitHub repo; every backup is a commit, so every version is kept forever.
+- **No password by default**: the repo holds `tri-nho.json` (raw data) and `tri-nho.md` (readable copy). Restoring only needs a GitHub sign-in and picking the repo. Anyone with access to the GitHub account or repo can read the memory, so keep the repo private.
+- **Extra encryption is optional** (checkbox during setup): `bo-nao.sbak` is encrypted with a recovery key, and `khoa.enc` is that recovery key encrypted with your password. Both use the OpenSSL format, so they can be opened without the app (`openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -md sha256 ...`). **Remove encryption** switches back to plain mode.
+- The power station backs up automatically when memory changes (checked every 10 minutes) and test-restores the backup weekly; on errors, or after 3 days without a backup, the app shows a red warning.
+- New or lost PC: install the app, choose **Restore**, sign in to GitHub and pick the repo marked ★ (a password is needed only for encrypted backups). The file index is rebuilt on the new machine.
+- Test without touching your real brain: set the `BSB_DATA_DIR` environment variable to another folder.
 
-## Tham số dòng lệnh
+## Command-line options
 
-- `/auto`: dọn ngầm theo cài đặt đã lưu (Task Scheduler gọi chế độ này).
-- `/report <file>`: chỉ quét, không xoá gì, rồi ghi kết quả phân loại ra file.
-- `/mcp`: chạy máy chủ MCP qua stdio cho coding agent.
-- `/index`: cập nhật chỉ mục Second Brain rồi thoát.
-- `/connect`: cài app vào AppData và kết nối Second Brain với mọi agent trên máy.
-- `/install`: cài vào máy.
-- `/uninstall [/quiet]`: gỡ cài đặt, giữ nguyên dữ liệu.
-- `/serve`: chạy trạm phát (ổ cắm HTTP, tự sao lưu).
-- `/backup-setup <repo> <mật khẩu>`, `/backup`, `/backup-verify`, `/restore <repo> <mật khẩu hoặc mã khôi phục>`: sao lưu và khôi phục bằng dòng lệnh.
+- `/auto`: silent cleanup using saved settings (used by Task Scheduler).
+- `/report <file>`: scan only, delete nothing, and write the classification to a file.
+- `/mcp`: run the MCP server over stdio for coding agents.
+- `/index`: update the Second Brain index and exit.
+- `/connect`: install into AppData and connect Second Brain to every agent on the machine.
+- `/install`: install on this machine.
+- `/uninstall [/quiet]`: uninstall, keeping your data.
+- `/serve`: run the power station (HTTP sockets, automatic backup).
+- `/backup-prepare [repo name]`: create / check the private backup repo on GitHub, printing each step (never touches passwords).
+- `/backup-setup <repo> [password]`, `/backup`, `/backup-verify`, `/restore <repo> [password or recovery key]`, `/backup-plain`: backup and restore from the command line.

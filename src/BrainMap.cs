@@ -279,7 +279,7 @@ class BrainMap : Control
                                       .GroupBy(n => SafeParent(n.Source)).Where(g => g.Key != null && g.Count() > 1))
         {
             var list = g.ToList();
-            for (int i = 1; i < list.Count; i++) es.Add(new Edge { A = list[i - 1], B = list[i], W = 0.12f, Why = "cùng thư mục " + g.Key, Implicit = true });
+            for (int i = 1; i < list.Count; i++) es.Add(new Edge { A = list[i - 1], B = list[i], W = 0.12f, Why = L.T("same folder ", "cùng thư mục ") + g.Key, Implicit = true });
         }
         foreach (var n in nodes.Values) n.Degree = 0;
         foreach (var e in es) { e.A.Degree++; e.B.Degree++; }
@@ -295,8 +295,8 @@ class BrainMap : Control
         if (status == lastStatus && activated.Count == 0) return;
         lastStatus = status;
         if (StatusChanged != null)
-            StatusChanged(nodes.Count + " nơ-ron (" + mem + " ghi nhớ, " + nodes.Values.Count(n => n.Kind == "du-an") + " dự án) · " + edges.Count(e => !e.Implicit) + " khớp thần kinh" +
-                          (activated.Count > 0 ? " · vừa hoạt động: " + string.Join(", ", activated.Take(3).Select(n => Short(n.Title, 30))) : ""));
+            StatusChanged(nodes.Count + L.T(" neurons (", " nơ-ron (") + mem + L.T(" memories, ", " ghi nhớ, ") + nodes.Values.Count(n => n.Kind == "du-an") + L.T(" projects) · ", " dự án) · ") + edges.Count(e => !e.Implicit) + L.T(" synapses", " khớp thần kinh") +
+                          (activated.Count > 0 ? L.T(" · just active: ", " · vừa hoạt động: ") + string.Join(", ", activated.Take(3).Select(n => Short(n.Title, 30))) : ""));
     }
 
     static string SafeParent(string p)
@@ -575,9 +575,9 @@ class BrainMap : Control
 
         DrawLegend(g, H);
         if (selected != null) DrawCard(g, selected, W);
-        string hint = cachedProjects == null ? "Đang nạp bộ não…"
-            : selected == null && nodes.Values.Count(n => n.Memory && IsMemoryKind(n.Kind)) == 0 ? "Chưa có ghi nhớ nào: khi agent dùng \"remember\", ghi nhớ sẽ mọc thành nơ-ron sáng ở thuỳ trán."
-            : "Kéo chuột để xoay · lăn chuột để phóng to · nhấp một nơ-ron để xem";
+        string hint = cachedProjects == null ? L.T("Loading the brain…", "Đang nạp bộ não…")
+            : selected == null && nodes.Values.Count(n => n.Memory && IsMemoryKind(n.Kind)) == 0 ? L.T("No memories yet: when an agent uses \"remember\", memories grow as glowing neurons in the frontal lobe.", "Chưa có ghi nhớ nào: khi agent dùng \"remember\", ghi nhớ sẽ mọc thành nơ-ron sáng ở thuỳ trán.")
+            : L.T("Drag to rotate · scroll to zoom · click a neuron to inspect", "Kéo chuột để xoay · lăn chuột để phóng to · nhấp một nơ-ron để xem");
         using (var br = new SolidBrush(Color.FromArgb(160, 190, 205, 240))) { var sz = g.MeasureString(hint, Font); g.DrawString(hint, Font, br, (W - sz.Width) / 2, H - 44); }
         // Máy chậm thì giảm nhịp khung hình cho đều, thay vì để giật
         frame.Interval = Math.Max(33, Math.Min(80, (int)watch.ElapsedMilliseconds + 12));
@@ -638,14 +638,14 @@ class BrainMap : Control
         float cw = Math.Min(360, W * 0.38f), x = W - cw - 12, y = 12;
         var lines = new List<Tuple<string, Font, Color>>();
         var bold = new Font("Segoe UI", 10f, FontStyle.Bold);
-        lines.Add(Tuple.Create(global::Memory.Label(n.Kind).ToUpper() + (n.Outdated ? " · ĐÃ CŨ" : ""), Font, KindColor(n.Kind)));
+        lines.Add(Tuple.Create(global::Memory.Label(n.Kind).ToUpper() + (n.Outdated ? L.T(" · OUTDATED", " · ĐÃ CŨ") : ""), Font, KindColor(n.Kind)));
         lines.Add(Tuple.Create(n.Title ?? "", bold, Color.White));
         if (!string.IsNullOrEmpty(n.Text)) lines.Add(Tuple.Create(Short(n.Text.Trim(), 420), Font, Color.FromArgb(215, 220, 240)));
-        if (!string.IsNullOrEmpty(n.Source)) lines.Add(Tuple.Create("Nguồn: " + n.Source, Font, Color.FromArgb(160, 190, 230)));
+        if (!string.IsNullOrEmpty(n.Source)) lines.Add(Tuple.Create(L.T("Source: ", "Nguồn: ") + n.Source, Font, Color.FromArgb(160, 190, 230)));
         var links = edges.Where(e => !e.Implicit && (e.A == n || e.B == n)).OrderByDescending(e => e.W).Take(6)
                          .Select(e => "↔ " + Short((e.A == n ? e.B : e.A).Title, 40) + "  (" + (e.Why ?? "") + ")").ToList();
-        if (links.Count > 0) lines.Add(Tuple.Create("Nối với:\n" + string.Join("\n", links), Font, Color.FromArgb(200, 220, 190)));
-        lines.Add(Tuple.Create((n.Uses > 0 ? "Được nhớ lại " + n.Uses + " lần · " : "") + "Nhấp đúp để mở vị trí", Font, Color.FromArgb(140, 160, 190)));
+        if (links.Count > 0) lines.Add(Tuple.Create(L.T("Linked to:\n", "Nối với:\n") + string.Join("\n", links), Font, Color.FromArgb(200, 220, 190)));
+        lines.Add(Tuple.Create((n.Uses > 0 ? L.T("Recalled ", "Được nhớ lại ") + n.Uses + L.T(" times · ", " lần · ") : "") + L.T("Double-click to open location", "Nhấp đúp để mở vị trí"), Font, Color.FromArgb(140, 160, 190)));
         var sizes = lines.Select(l => g.MeasureString(l.Item1, l.Item2, (int)cw - 20)).ToList();
         float h = 14 + sizes.Sum(s => s.Height + 4);
         using (var br = new SolidBrush(Color.FromArgb(225, 10, 16, 36))) g.FillRectangle(br, x, y, cw, h);

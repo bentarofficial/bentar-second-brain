@@ -12,9 +12,15 @@ using System.Windows.Forms;
 partial class MainForm
 {
     // ---------- Bảng màu ----------
-    static readonly Color Bg = Color.FromArgb(9, 13, 28), Side = Color.FromArgb(13, 18, 38), Panel2 = Color.FromArgb(20, 27, 54),
-        Ink = Color.FromArgb(222, 230, 247), Dim = Color.FromArgb(140, 155, 190), Accent = Color.FromArgb(110, 180, 255),
-        Violet = Color.FromArgb(108, 84, 230), Good = Color.FromArgb(90, 210, 150), Bad = Color.FromArgb(255, 110, 110);
+    static Color Bg { get { return Theme.Bg; } }
+    static Color Side { get { return Theme.Side; } }
+    static Color Panel2 { get { return Theme.Panel2; } }
+    static Color Ink { get { return Theme.Ink; } }
+    static Color Dim { get { return Theme.Dim; } }
+    static Color Accent { get { return Theme.Accent; } }
+    static Color Violet { get { return Theme.Violet; } }
+    static Color Good { get { return Theme.Good; } }
+    static Color Bad { get { return Theme.Bad; } }
 
     readonly Label lblBrain = new Label(), lblBackup = new Label(), lblPills = new Label(), lblPageTitle = new Label();
     readonly TextBox txtBrain = new TextBox();
@@ -31,15 +37,16 @@ partial class MainForm
         ClientSize = new Size(1240, 780);
         MinimumSize = SizeFromClientSize(new Size(1000, 640));
         BackColor = Bg; ForeColor = Ink;
+        Theme.TitleBar(this);
 
         // ----- Thanh bên trái -----
         var side = new Panel { Dock = DockStyle.Left, Width = 216, BackColor = Side, Padding = new Padding(0, 0, 0, 10) };
         var logo = new Label { Text = "Bentar\nSecond Brain", Dock = DockStyle.Top, Height = 78, ForeColor = Ink, Font = new Font("Segoe UI", 15f, FontStyle.Bold), Padding = new Padding(18, 14, 0, 0) };
         var nav = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, BackColor = Side, Padding = new Padding(10, 6, 10, 0) };
         var navItems = new[] {
-            Tuple.Create("brain", "◉   Bộ não"), Tuple.Create("search", "⌕   Tìm kiếm"), Tuple.Create("memory", "✦   Trí nhớ"),
-            Tuple.Create("activity", "⚡   Hoạt động"), Tuple.Create("socket", "⇄   Ổ cắm"), Tuple.Create("backup", "☁   Sao lưu"),
-            Tuple.Create("maintain", "⚙   Bảo trì máy") };
+            Tuple.Create("brain", L.T("◉   Brain", "◉   Bộ não")), Tuple.Create("search", L.T("⌕   Search", "⌕   Tìm kiếm")), Tuple.Create("memory", L.T("✦   Memory", "✦   Trí nhớ")),
+            Tuple.Create("activity", L.T("⚡   Activity", "⚡   Hoạt động")), Tuple.Create("socket", L.T("⇄   Sockets", "⇄   Ổ cắm")), Tuple.Create("backup", L.T("☁   Backup", "☁   Sao lưu")),
+            Tuple.Create("maintain", L.T("⚙   PC maintenance", "⚙   Bảo trì máy")) };
         foreach (var it in navItems)
         {
             var key = it.Item1;
@@ -47,29 +54,30 @@ partial class MainForm
                 BackColor = Side, Font = new Font("Segoe UI", 10.5f), Padding = new Padding(10, 0, 0, 0), Margin = new Padding(0, 2, 0, 2), Cursor = Cursors.Hand };
             b.FlatAppearance.BorderSize = 0;
             b.FlatAppearance.MouseOverBackColor = Panel2;
+            Round.Button(b, 10);
             b.Click += (s, e) => ShowPage(key);
             navButtons[key] = b;
             nav.Controls.Add(b);
         }
-        var foot = new Panel { Dock = DockStyle.Bottom, Height = 104, BackColor = Side, Padding = new Padding(12, 0, 12, 0) };
-        var lblVer = new Label { Text = "Phiên bản " + Updater.Current.ToString(3), Dock = DockStyle.Top, Height = 22, ForeColor = Dim, Font = new Font("Segoe UI", 8.5f) };
-        btnUpdate.Text = "Kiểm tra cập nhật";
-        Style(btnUpdate); btnUpdate.Dock = DockStyle.Top; btnUpdate.Height = 34;
-        btnUpdate.Click += async (s, e) => await CheckUpdate(true);
-        foot.Controls.Add(btnUpdate);
+        // Chân thanh bên (trên xuống): [Cài vào máy] [Cập nhật – chỉ khi có bản mới] [góc người dùng]
+        var foot = new FlowLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, FlowDirection = FlowDirection.TopDown, WrapContents = false, BackColor = Side, Padding = new Padding(10, 0, 10, 0) };
         if (!Installer.RunningInstalled)
         {
-            var btnInstall = new Button { Text = Installer.IsInstalled ? "Mở bản đã cài" : "Cài vào máy", Dock = DockStyle.Top, Height = 34 };
+            var btnInstall = new Button { Text = Installer.IsInstalled ? L.T("Open installed app", "Mở bản đã cài") : L.T("Install on this PC", "Cài vào máy"), Width = 196, Height = 34, Margin = new Padding(0, 0, 0, 6) };
             Style(btnInstall, true);
             btnInstall.Click += (s, e) =>
             {
                 try { if (!Installer.IsInstalled || Updater.Current > Installer.InstalledVersion) Installer.Install(); Process.Start(Installer.Exe); Close(); }
-                catch (Exception ex) { MessageBox.Show("Cài đặt không thành công:\n" + ex.Message, Text); }
+                catch (Exception ex) { MessageBox.Show(L.T("Installation failed:\n", "Cài đặt không thành công:\n") + ex.Message, Text); }
             };
-            foot.Controls.Add(new Panel { Dock = DockStyle.Top, Height = 6, BackColor = Side });
             foot.Controls.Add(btnInstall);
         }
-        foot.Controls.Add(lblVer);
+        btnUpdate.Text = L.T("Check for updates", "Kiểm tra cập nhật");
+        Style(btnUpdate); btnUpdate.Width = 196; btnUpdate.Height = 34; btnUpdate.Margin = new Padding(0, 0, 0, 6); btnUpdate.Visible = false;   // chỉ hiện khi có bản mới
+        btnUpdate.Click += async (s, e) => await CheckUpdate(true);
+        foot.Controls.Add(btnUpdate);
+        // Góc người dùng: bấm để mở menu cài đặt nhanh (giống Claude Code)
+        foot.Controls.Add(BuildUserButton());
         side.Controls.Add(nav); side.Controls.Add(foot); side.Controls.Add(logo);
 
         // ----- Thanh trên: tên trang + các chỉ số -----
@@ -88,6 +96,7 @@ partial class MainForm
         pages["socket"] = BuildSocketPage();
         pages["backup"] = BuildBackupPage();
         pages["maintain"] = BuildMaintainPage();
+        pages["settings"] = BuildSettingsPage();
         foreach (var p in pages.Values) { p.Dock = DockStyle.Fill; p.Visible = false; content.Controls.Add(p); }
 
         Controls.Add(content); Controls.Add(top); Controls.Add(side);
@@ -97,13 +106,13 @@ partial class MainForm
         timer.Tick += (s, e) => ShowBrainStatus();
         timer.Start();
         Task.Run(() => { Brain.EnsureLoaded(); Brain.RefreshIfStale(TimeSpan.FromHours(6)); });
-        Shown += async (s, e) => await CheckUpdate(false);
+        Shown += async (s, e) => { if (L.On("autoupdate", true)) await CheckUpdate(false); };
         Shown += (s, e) => BeginInvoke(new Action(() => BackupUI.FirstRun(this)));   // lần đầu: khôi phục / tạo mới + sao lưu / để sau
     }
 
     static readonly Dictionary<string, string> PageTitles = new Dictionary<string, string> {
-        { "brain", "Bộ não" }, { "search", "Tìm trên toàn máy" }, { "memory", "Trí nhớ" }, { "activity", "Hoạt động" },
-        { "socket", "Ổ cắm – cắm agent và công cụ" }, { "backup", "Sao lưu bộ não" }, { "maintain", "Bảo trì máy" } };
+        { "brain", L.T("Brain", "Bộ não") }, { "search", L.T("Search the whole PC", "Tìm trên toàn máy") }, { "memory", L.T("Memory", "Trí nhớ") }, { "activity", L.T("Activity", "Hoạt động") },
+        { "socket", L.T("Sockets – plug in agents and tools", "Ổ cắm – cắm agent và công cụ") }, { "backup", L.T("Brain backup", "Sao lưu bộ não") }, { "maintain", L.T("PC maintenance", "Bảo trì máy") }, { "settings", L.T("Settings", "Cài đặt") } };
 
     void ShowPage(string key)
     {
@@ -116,7 +125,9 @@ partial class MainForm
             kv.Value.ForeColor = on ? Ink : Dim;
             kv.Value.Font = new Font("Segoe UI", 10.5f, on ? FontStyle.Bold : FontStyle.Regular);
         }
+        if (userBtn != null) userBtn.Invalidate();
         lblPageTitle.Text = PageTitles[key];
+        if (key == "settings") RefreshSettings();
         if (key == "memory") FillMemories();
         if (key == "activity") FillActivity();
         if (key == "backup") FillBackup();
@@ -129,8 +140,9 @@ partial class MainForm
         b.FlatStyle = FlatStyle.Flat;
         b.BackColor = primary ? Violet : Panel2;
         b.ForeColor = primary ? Color.White : Ink;
-        b.FlatAppearance.BorderColor = primary ? Violet : Color.FromArgb(48, 60, 100);
+        b.FlatAppearance.BorderColor = primary ? Violet : Theme.Border;
         b.Cursor = Cursors.Hand;
+        Round.Button(b);
     }
 
     static Button Btn(string text, int width, bool primary = false)
@@ -145,7 +157,7 @@ partial class MainForm
     // ListView tối: tự vẽ tiêu đề cột (Windows không cho đổi màu tiêu đề), cột cuối lấp chỗ trống
     static void Dark(ListView lv)
     {
-        lv.BackColor = Color.FromArgb(14, 20, 42); lv.ForeColor = Ink; lv.BorderStyle = BorderStyle.None;
+        lv.BackColor = Theme.List; lv.ForeColor = Ink; lv.BorderStyle = BorderStyle.None;
         lv.View = View.Details; lv.FullRowSelect = true; lv.OwnerDraw = true;
         lv.DrawColumnHeader += (s, e) =>
         {
@@ -173,20 +185,20 @@ partial class MainForm
     // ---------- Bộ não ----------
     Panel BuildBrainPage()
     {
-        var p = new Panel { BackColor = Color.FromArgb(2, 4, 10) };
+        var p = new Panel { BackColor = Theme.Space };
         map = new BrainMap { Dock = DockStyle.Fill };
-        var bar = new Panel { Dock = DockStyle.Top, Height = 40, BackColor = Color.FromArgb(2, 4, 10), Padding = new Padding(16, 6, 16, 4) };
+        var bar = new Panel { Dock = DockStyle.Top, Height = 40, BackColor = Theme.Space, Padding = new Padding(16, 6, 16, 4) };
         var txt = new TextBox { Dock = DockStyle.Left, Width = 320 };
         Dark(txt);
         var lbl = new Label { Dock = DockStyle.Fill, ForeColor = Color.FromArgb(170, 190, 230), Font = new Font("Segoe UI", 8.5f), TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(10, 0, 0, 0),
-            Text = "Gõ rồi Enter để tìm trên bản đồ · kéo chuột để xoay · lăn để phóng to" };
+            Text = L.T("Type and press Enter to search the map · drag to rotate · scroll to zoom", "Gõ rồi Enter để tìm trên bản đồ · kéo chuột để xoay · lăn để phóng to") };
         map.StatusChanged += s => lbl.Text = s;
         txt.KeyDown += (s, e) =>
         {
             if (e.KeyCode != Keys.Enter) return;
             e.SuppressKeyPress = true;
             int n = map.Highlight(txt.Text);
-            lbl.Text = txt.Text.Trim().Length == 0 ? "" : "\"" + txt.Text.Trim() + "\": " + n + " nơ-ron sáng lên";
+            lbl.Text = txt.Text.Trim().Length == 0 ? "" : "\"" + txt.Text.Trim() + "\": " + n + L.T(" neurons lit up", " nơ-ron sáng lên");
         };
         bar.Controls.Add(lbl); bar.Controls.Add(txt);
         p.Controls.Add(map); p.Controls.Add(bar);
@@ -201,13 +213,13 @@ partial class MainForm
         var bar = Row(DockStyle.Top, 48);
         txtBrain.Width = 520; txtBrain.Font = new Font("Segoe UI", 11f); txtBrain.Margin = new Padding(0, 4, 8, 0);
         Dark(txtBrain);
-        var btnFind = Btn("Tìm", 100, true);
-        var btnIndex = Btn("Cập nhật chỉ mục", 150);
+        var btnFind = Btn(L.T("Search", "Tìm"), 100, true);
+        var btnIndex = Btn(L.T("Update index", "Cập nhật chỉ mục"), 150);
         bar.Controls.AddRange(new Control[] { txtBrain, btnFind, btnIndex });
         lblBrain.Dock = DockStyle.Top; lblBrain.Height = 40; lblBrain.ForeColor = Dim; lblBrain.Font = new Font("Segoe UI", 8.5f);
         Dark(brainHits);
         brainHits.Dock = DockStyle.Fill; brainHits.ShowItemToolTips = true;
-        brainHits.Columns.Add("File", 420); brainHits.Columns.Add("Sửa", 90); brainHits.Columns.Add("Đoạn khớp", 400);
+        brainHits.Columns.Add("File", 420); brainHits.Columns.Add(L.T("Edit", "Sửa"), 90); brainHits.Columns.Add(L.T("Match", "Đoạn khớp"), 400);
         brainHits.DoubleClick += (s, e) => { if (brainHits.SelectedItems.Count > 0 && brainHits.SelectedItems[0].Tag != null) Process.Start("explorer.exe", "/select,\"" + brainHits.SelectedItems[0].Tag + "\""); };
         Func<Task> find = async () =>
         {
@@ -219,11 +231,11 @@ partial class MainForm
                 var snip = (h.Snippet ?? "").Replace("\r", "").Replace("\n", "  ·  ");
                 brainHits.Items.Add(new ListViewItem(new[] { h.File.Path, DateTime.FromBinary(h.File.Mtime).ToString("dd/MM/yyyy"), snip }) { Tag = h.File.Path, ToolTipText = h.File.Path + "\n" + h.Snippet });
             }
-            if (hits.Count == 0) brainHits.Items.Add(new ListViewItem(new[] { "Không tìm thấy.", "", "" }));
+            if (hits.Count == 0) brainHits.Items.Add(new ListViewItem(new[] { L.T("Nothing found.", "Không tìm thấy."), "", "" }));
         };
         btnFind.Click += async (s, e) => await find();
         txtBrain.KeyDown += async (s, e) => { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; await find(); } };
-        btnIndex.Click += (s, e) => { if (!Brain.Building) Task.Run(() => { try { Brain.Build(); } catch (Exception ex) { Brain.Progress = "Lỗi: " + ex.Message; } }); };
+        btnIndex.Click += (s, e) => { if (!Brain.Building) Task.Run(() => { try { Brain.Build(); } catch (Exception ex) { Brain.Progress = L.T("Error: ", "Lỗi: ") + ex.Message; } }); };
         p.Controls.Add(brainHits); p.Controls.Add(lblBrain); p.Controls.Add(bar);
         return p;
     }
@@ -238,20 +250,20 @@ partial class MainForm
         var p = Page();
         var bar = Row(DockStyle.Top, 48);
         cboKind.DropDownStyle = ComboBoxStyle.DropDownList; cboKind.Width = 170; cboKind.FlatStyle = FlatStyle.Flat; cboKind.BackColor = Panel2; cboKind.ForeColor = Ink; cboKind.Margin = new Padding(0, 6, 8, 0);
-        cboKind.Items.AddRange(new object[] { "Mọi loại", "Quyết định", "Bài học", "Sự thật", "Việc cần làm", "Ghi chú" });
+        cboKind.Items.AddRange(new object[] { L.T("All kinds", "Mọi loại"), L.T("Decision", "Quyết định"), L.T("Lesson", "Bài học"), L.T("Fact", "Sự thật"), L.T("To-do", "Việc cần làm"), L.T("Note", "Ghi chú") });
         cboKind.SelectedIndex = 0;
         txtMemFilter.Width = 300; txtMemFilter.Margin = new Padding(0, 6, 8, 0); Dark(txtMemFilter);
-        var bEdit = Btn("Sửa", 80); var bOld = Btn("Đánh dấu đã cũ", 140); var bDel = Btn("Xoá", 80); var bRef = Btn("Làm mới", 90);
+        var bEdit = Btn(L.T("Edit", "Sửa"), 80); var bOld = Btn(L.T("Mark outdated", "Đánh dấu đã cũ"), 140); var bDel = Btn(L.T("Delete", "Xoá"), 80); var bRef = Btn(L.T("Refresh", "Làm mới"), 90);
         bar.Controls.AddRange(new Control[] { cboKind, txtMemFilter, bEdit, bOld, bDel, bRef });
         Dark(memList);
         memList.Dock = DockStyle.Fill;
-        memList.Columns.Add("Loại", 100); memList.Columns.Add("Tiêu đề", 360); memList.Columns.Add("Agent", 110); memList.Columns.Add("Cập nhật", 95); memList.Columns.Add("Nhớ lại", 70); memList.Columns.Add("Nguồn", 300);
+        memList.Columns.Add(L.T("Kind", "Loại"), 100); memList.Columns.Add(L.T("Title", "Tiêu đề"), 360); memList.Columns.Add("Agent", 110); memList.Columns.Add(L.T("Updated", "Cập nhật"), 95); memList.Columns.Add(L.T("Recalls", "Nhớ lại"), 70); memList.Columns.Add(L.T("Source", "Nguồn"), 300);
         var detail = new Label { Dock = DockStyle.Bottom, Height = 96, ForeColor = Ink, BackColor = Panel2, Padding = new Padding(12, 8, 12, 8), Font = new Font("Segoe UI", 9.5f),
-            Text = "Chọn một ghi nhớ để xem nội dung. Agent ghi nhớ bằng công cụ remember; chỉ bạn mới xoá được ghi nhớ." };
+            Text = L.T("Select a memory to see its content. Agents save memories with the remember tool; only you can delete them.", "Chọn một ghi nhớ để xem nội dung. Agent ghi nhớ bằng công cụ remember; chỉ bạn mới xoá được ghi nhớ.") };
         memList.SelectedIndexChanged += (s, e) =>
         {
             var n = memList.SelectedItems.Count > 0 ? memList.SelectedItems[0].Tag as Neuron : null;
-            if (n != null) detail.Text = n.Title + (n.Outdated ? "  (đã cũ)" : "") + "\n" + n.Text;
+            if (n != null) detail.Text = n.Title + (n.Outdated ? L.T("  (outdated)", "  (đã cũ)") : "") + "\n" + n.Text;
         };
         cboKind.SelectedIndexChanged += (s, e) => FillMemories();
         txtMemFilter.TextChanged += (s, e) => FillMemories();
@@ -260,14 +272,14 @@ partial class MainForm
         bEdit.Click += (s, e) =>
         {
             var n = sel(); if (n == null) return;
-            var text = Prompt("Sửa ghi nhớ", n.Title, n.Text);
+            var text = Prompt(L.T("Edit memory", "Sửa ghi nhớ"), n.Title, n.Text);
             if (text != null) { Memory.Revise(n.Id, text, n.Outdated); FillMemories(); }
         };
         bOld.Click += (s, e) => { var n = sel(); if (n == null) return; Memory.Revise(n.Id, null, !n.Outdated); FillMemories(); };
         bDel.Click += (s, e) =>
         {
             var n = sel(); if (n == null) return;
-            if (MessageBox.Show(this, "Xoá hẳn ghi nhớ \"" + n.Title + "\"?\nKhông khôi phục được (trừ từ bản sao lưu cũ).", Text, MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes)
+            if (MessageBox.Show(this, L.T("Permanently delete memory \"", "Xoá hẳn ghi nhớ \"") + n.Title + L.T("\"?\nThis cannot be undone (except from an older backup).", "\"?\nKhông khôi phục được (trừ từ bản sao lưu cũ)."), Text, MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes)
             { Memory.Delete(n.Id); FillMemories(); }
         };
         p.Controls.Add(memList); p.Controls.Add(detail); p.Controls.Add(bar);
@@ -288,7 +300,7 @@ partial class MainForm
             memList.Items.Add(new ListViewItem(new[] { Memory.Label(n.Kind), n.Title, n.Agent ?? "", n.Updated.ToLocalTime().ToString("dd/MM/yyyy"), n.Uses.ToString(), n.Source ?? "" })
                 { Tag = n, ForeColor = n.Outdated ? Dim : Ink });
         }
-        if (memList.Items.Count == 0) memList.Items.Add(new ListViewItem(new[] { "", "Chưa có ghi nhớ nào. Agent sẽ ghi nhớ khi làm việc (công cụ remember).", "", "", "", "" }) { ForeColor = Dim });
+        if (memList.Items.Count == 0) memList.Items.Add(new ListViewItem(new[] { "", L.T("No memories yet. Agents save memories as they work (remember tool).", "Chưa có ghi nhớ nào. Agent sẽ ghi nhớ khi làm việc (công cụ remember)."), "", "", "", "" }) { ForeColor = Dim });
         memList.EndUpdate();
     }
 
@@ -298,8 +310,8 @@ partial class MainForm
         var l = new Label { Text = label, Location = new Point(14, 12), Size = new Size(530, 22) };
         var t = new TextBox { Multiline = true, ScrollBars = ScrollBars.Vertical, Location = new Point(14, 38), Size = new Size(530, 200), Text = value };
         Dark(t);
-        var ok = Btn("Lưu", 90, true); ok.Location = new Point(358, 250); ok.DialogResult = DialogResult.OK;
-        var no = Btn("Huỷ", 90); no.Location = new Point(454, 250); no.DialogResult = DialogResult.Cancel;
+        var ok = Btn(L.T("Save", "Lưu"), 90, true); ok.Location = new Point(358, 250); ok.DialogResult = DialogResult.OK;
+        var no = Btn(L.T("Cancel", "Huỷ"), 90); no.Location = new Point(454, 250); no.DialogResult = DialogResult.Cancel;
         f.Controls.AddRange(new Control[] { l, t, ok, no });
         f.AcceptButton = null; f.CancelButton = no;
         return f.ShowDialog(this) == DialogResult.OK ? t.Text : null;
@@ -312,13 +324,13 @@ partial class MainForm
         var split = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Horizontal, SplitterDistance = 200, BackColor = Bg };
         split.Panel1.BackColor = split.Panel2.BackColor = Bg;
         Dark(devList); devList.Dock = DockStyle.Fill;
-        devList.Columns.Add("Thiết bị (bóng đèn)", 260); devList.Columns.Add("Trạng thái", 140); devList.Columns.Add("Lần cuối", 150); devList.Columns.Add("Số lần dùng", 100); devList.Columns.Add("Ổ cắm", 200);
+        devList.Columns.Add(L.T("Device (bulb)", "Thiết bị (bóng đèn)"), 260); devList.Columns.Add(L.T("Status", "Trạng thái"), 140); devList.Columns.Add(L.T("Last seen", "Lần cuối"), 150); devList.Columns.Add(L.T("Uses", "Số lần dùng"), 100); devList.Columns.Add(L.T("Socket", "Ổ cắm"), 200);
         Dark(actList); actList.Dock = DockStyle.Fill;
-        actList.Columns.Add("Lúc", 140); actList.Columns.Add("Thiết bị", 180); actList.Columns.Add("Việc", 140); actList.Columns.Add("Chi tiết", 500);
+        actList.Columns.Add(L.T("Time", "Lúc"), 140); actList.Columns.Add(L.T("Device", "Thiết bị"), 180); actList.Columns.Add(L.T("Action", "Việc"), 140); actList.Columns.Add(L.T("Details", "Chi tiết"), 500);
         split.Panel1.Controls.Add(devList);
-        split.Panel1.Controls.Add(Text2("Các agent và công cụ đã cắm vào bộ não trong 30 ngày qua", DockStyle.Top, 26, Dim));
+        split.Panel1.Controls.Add(Text2(L.T("Agents and tools plugged into the brain in the last 30 days", "Các agent và công cụ đã cắm vào bộ não trong 30 ngày qua"), DockStyle.Top, 26, Dim));
         split.Panel2.Controls.Add(actList);
-        split.Panel2.Controls.Add(Text2("Nhật ký hoạt động (mới nhất trên cùng)", DockStyle.Top, 26, Dim));
+        split.Panel2.Controls.Add(Text2(L.T("Activity log (newest first)", "Nhật ký hoạt động (mới nhất trên cùng)"), DockStyle.Top, 26, Dim));
         p.Controls.Add(split);
         var t = new Timer { Interval = 3000 };
         t.Tick += (s, e) => { if (currentPage == "activity") FillActivity(); };
@@ -337,10 +349,10 @@ partial class MainForm
                 foreach (var d in r.Result.Item1)
                 {
                     var ago = DateTime.Now - d.LastSeen;
-                    string state = ago.TotalMinutes < 2 ? "● đang sáng" : ago.TotalHours < 24 ? "○ hôm nay" : "○ nghỉ";
+                    string state = ago.TotalMinutes < 2 ? L.T("● lit", "● đang sáng") : ago.TotalHours < 24 ? L.T("○ today", "○ hôm nay") : L.T("○ idle", "○ nghỉ");
                     devList.Items.Add(new ListViewItem(new[] { d.Name, state, d.LastSeen.ToString("HH:mm dd/MM/yyyy"), d.Uses.ToString(), d.Channels }) { ForeColor = ago.TotalMinutes < 2 ? Good : Ink });
                 }
-                if (devList.Items.Count == 0) devList.Items.Add(new ListViewItem(new[] { "Chưa có thiết bị nào cắm vào. Xem trang Ổ cắm.", "", "", "", "" }) { ForeColor = Dim });
+                if (devList.Items.Count == 0) devList.Items.Add(new ListViewItem(new[] { L.T("No devices plugged in yet. See the Sockets page.", "Chưa có thiết bị nào cắm vào. Xem trang Ổ cắm."), "", "", "", "" }) { ForeColor = Dim });
                 devList.EndUpdate();
                 actList.BeginUpdate(); actList.Items.Clear();
                 foreach (var a in r.Result.Item2) actList.Items.Add(new ListViewItem(new[] { a.T.ToString("HH:mm:ss dd/MM"), a.Client, a.Action, a.Detail }));
@@ -354,10 +366,10 @@ partial class MainForm
     {
         var p = Page();
         var bar = Row(DockStyle.Top, 48);
-        var bAuto = Btn("Tự cắm các agent trên máy", 220, true);
-        var bShow = Btn("Hiện mã khoá", 130);
-        var bCopy = Btn("Chép hướng dẫn", 140);
-        var bStart = Btn("Bật trạm phát", 130);
+        var bAuto = Btn(L.T("Auto-connect agents on this PC", "Tự cắm các agent trên máy"), 220, true);
+        var bShow = Btn(L.T("Show key", "Hiện mã khoá"), 130);
+        var bCopy = Btn(L.T("Copy guide", "Chép hướng dẫn"), 140);
+        var bStart = Btn(L.T("Start station", "Bật trạm phát"), 130);
         bar.Controls.AddRange(new Control[] { bAuto, bShow, bCopy, bStart });
         var lblState = Text2("", DockStyle.Top, 28, Dim);
         var box = new TextBox { Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Font = new Font("Consolas", 10f), WordWrap = true };
@@ -368,12 +380,12 @@ partial class MainForm
             PowerStation.LoadConfig();
             bool running = PowerStation.IsRunning();
             lblState.ForeColor = running ? Good : Bad;
-            lblState.Text = running ? "● Trạm phát đang chạy tại " + PowerStation.BaseUrl + " – mọi thiết bị dưới đây dùng chung một bộ não." : "● Trạm phát chưa chạy – bấm \"Bật trạm phát\".";
-            box.Text = SocketGuide(reveal ? PowerStation.Token : "<bấm Hiện mã khoá>");
+            lblState.Text = running ? L.T("● Station running at ", "● Trạm phát đang chạy tại ") + PowerStation.BaseUrl + L.T(" – every device below shares one brain.", " – mọi thiết bị dưới đây dùng chung một bộ não.") : L.T("● Station not running – click \"Start station\".", "● Trạm phát chưa chạy – bấm \"Bật trạm phát\".");
+            box.Text = SocketGuide(reveal ? PowerStation.Token : L.T("<click Show key>", "<bấm Hiện mã khoá>"));
         };
         bAuto.Click += async (s, e) => await ConnectAgents();
-        bShow.Click += (s, e) => { reveal = !reveal; bShow.Text = reveal ? "Ẩn mã khoá" : "Hiện mã khoá"; refresh(); };
-        bCopy.Click += (s, e) => { try { Clipboard.SetText(SocketGuide(PowerStation.Token)); bCopy.Text = "Đã chép"; } catch { } };
+        bShow.Click += (s, e) => { reveal = !reveal; bShow.Text = reveal ? L.T("Hide key", "Ẩn mã khoá") : L.T("Show key", "Hiện mã khoá"); refresh(); };
+        bCopy.Click += (s, e) => { try { Clipboard.SetText(SocketGuide(PowerStation.Token)); bCopy.Text = L.T("Copied", "Đã chép"); } catch { } };
         bStart.Click += (s, e) => { PowerStation.EnsureRunning(Installer.IsInstalled ? Installer.Exe : Application.ExecutablePath); System.Threading.Thread.Sleep(800); refresh(); };
         p.VisibleChanged += (s, e) => { if (p.Visible) refresh(); };
         p.Controls.Add(box); p.Controls.Add(lblState); p.Controls.Add(bar);
@@ -385,11 +397,11 @@ partial class MainForm
         string exe = Installer.IsInstalled ? Installer.Exe : Application.ExecutablePath, url = PowerStation.BaseUrl;
         string nl = Environment.NewLine;
         return string.Join(nl, new[] {
-            "MỘT BỘ NÃO – MỌI AGENT VÀ CÔNG CỤ CẮM VÀO",
-            "Mã khoá: " + token,
+            L.T("ONE BRAIN – EVERY AGENT AND TOOL PLUGS IN", "MỘT BỘ NÃO – MỌI AGENT VÀ CÔNG CỤ CẮM VÀO"),
+            L.T("Key: ", "Mã khoá: ") + token,
             "",
-            "1) Coding agent hỗ trợ MCP (Claude Code, Codex, Gemini CLI, Cursor, Claude Desktop...)",
-            "   Bấm \"Tự cắm các agent trên máy\", hoặc tự thêm:",
+            L.T("1) Coding agents with MCP support (Claude Code, Codex, Gemini CLI, Cursor, Claude Desktop...)", "1) Coding agent hỗ trợ MCP (Claude Code, Codex, Gemini CLI, Cursor, Claude Desktop...)"),
+            L.T("   Click \"Auto-connect agents on this PC\", or add it yourself:", "   Bấm \"Tự cắm các agent trên máy\", hoặc tự thêm:"),
             "   Claude Code (stdio):  claude mcp add --scope user second-brain -- \"" + exe + "\" /mcp",
             "   Claude Code (HTTP):   claude mcp add --transport http second-brain " + url + "/mcp --header \"Authorization: Bearer " + token + "\"",
             "   Codex (~/.codex/config.toml):",
@@ -399,22 +411,22 @@ partial class MainForm
             "   Cursor / Claude Desktop / Windsurf / Gemini (JSON):",
             "     \"second-brain\": { \"command\": \"" + exe.Replace("\\", "\\\\") + "\", \"args\": [\"/mcp\"] }",
             "",
-            "2) Agent hỗ trợ MCP qua HTTP",
+            L.T("2) Agents with MCP over HTTP", "2) Agent hỗ trợ MCP qua HTTP"),
             "   URL: " + url + "/mcp     Header: Authorization: Bearer " + token,
             "",
-            "3) Mọi công cụ gọi được HTTP (n8n, Make, script, tiện ích trình duyệt, agent tự xây...)",
-            "   Mô tả OpenAPI:  " + url + "/openapi.json",
-            "   Tìm:            GET  " + url + "/api/search?query=bao%20cao",
-            "   Nhớ lại:        GET  " + url + "/api/recall?query=khach%20hang",
-            "   Ghi nhớ:        POST " + url + "/api/remember   {\"text\":\"...\",\"kind\":\"lesson\",\"source\":\"D:\\\\du-an\"}",
-            "   Header bắt buộc: Authorization: Bearer " + token + "     (đặt tên thiết bị: X-Client-Name: ten-cong-cu)",
+            L.T("3) Any tool that can call HTTP (n8n, Make, scripts, browser extensions, custom agents...)", "3) Mọi công cụ gọi được HTTP (n8n, Make, script, tiện ích trình duyệt, agent tự xây...)"),
+            L.T("   OpenAPI spec:   ", "   Mô tả OpenAPI:  ") + url + "/openapi.json",
+            L.T("   Search:         GET  ", "   Tìm:            GET  ") + url + L.T("/api/search?query=report", "/api/search?query=bao%20cao"),
+            L.T("   Recall:         GET  ", "   Nhớ lại:        GET  ") + url + L.T("/api/recall?query=customer", "/api/recall?query=khach%20hang"),
+            L.T("   Remember:       POST ", "   Ghi nhớ:        POST ") + url + "/api/remember   {\"text\":\"...\",\"kind\":\"lesson\",\"source\":\"D:\\\\project\"}",
+            L.T("   Required header: Authorization: Bearer ", "   Header bắt buộc: Authorization: Bearer ") + token + L.T("     (name your device: X-Client-Name: tool-name)", "     (đặt tên thiết bị: X-Client-Name: ten-cong-cu)"),
             "",
             "   curl:   curl -H \"Authorization: Bearer " + token + "\" \"" + url + "/api/recall?query=bao%20cao\"",
             "   Python: requests.get(\"" + url + "/api/recall\", params={\"query\": \"bao cao\"}, headers={\"Authorization\": \"Bearer " + token + "\"}).json()[\"text\"]",
-            "   n8n:    nút HTTP Request · Method GET/POST · URL như trên · Header Authorization = Bearer <mã khoá>",
+            L.T("   n8n:    HTTP Request node · Method GET/POST · URL as above · Header Authorization = Bearer <key>", "   n8n:    nút HTTP Request · Method GET/POST · URL như trên · Header Authorization = Bearer <mã khoá>"),
             "",
-            "Công cụ có sẵn: search, list_projects, project_overview, read_file, list_dir, copy, recall, remember, revise_memory, connect, index_status",
-            "An toàn: ổ cắm chỉ nghe trên máy này (127.0.0.1); không có mã khoá thì không gọi được; Second Brain không bao giờ sửa/xoá file của bạn." });
+            L.T("Available tools: search, list_projects, project_overview, read_file, list_dir, copy, recall, remember, revise_memory, connect, index_status", "Công cụ có sẵn: search, list_projects, project_overview, read_file, list_dir, copy, recall, remember, revise_memory, connect, index_status"),
+            L.T("Safety: the socket only listens on this PC (127.0.0.1); calls without the key are refused; Second Brain never edits or deletes your files.", "An toàn: ổ cắm chỉ nghe trên máy này (127.0.0.1); không có mã khoá thì không gọi được; Second Brain không bao giờ sửa/xoá file của bạn.") });
     }
 
     // ---------- Sao lưu ----------
@@ -422,13 +434,20 @@ partial class MainForm
     Panel BuildBackupPage()
     {
         var p = Page();
-        var intro = Text2("Bộ não được mã hoá rồi sao lưu lên một repo GitHub riêng tư; mỗi lần sao lưu là một phiên bản, giữ được cả đời. " +
-            "Đổi máy hay mất máy: bấm Khôi phục, đăng nhập GitHub, chọn repo, nhập mật khẩu hoặc mã khôi phục.", DockStyle.Top, 48, Dim);
+        var intro = Text2(L.T("The brain is backed up to a private GitHub repo; every backup is a version you keep forever. ", "Bộ não được sao lưu lên một repo GitHub riêng tư; mỗi lần sao lưu là một phiên bản, giữ được cả đời. ") +
+            L.T("New or lost PC: click Restore, sign in to GitHub, pick the repo. Password encryption is optional.", "Đổi máy hay mất máy: bấm Khôi phục, đăng nhập GitHub, chọn repo. Mã hoá bằng mật khẩu là tuỳ chọn."), DockStyle.Top, 48, Dim);
         bkState.Dock = DockStyle.Top; bkState.Height = 40; bkState.Font = new Font("Segoe UI", 13f, FontStyle.Bold);
         bkInfo.Dock = DockStyle.Top; bkInfo.Height = 110; bkInfo.ForeColor = Ink; bkInfo.Font = new Font("Segoe UI", 10f);
         var bar = Row(DockStyle.Top, 52);
-        var bSetup = Btn("Thiết lập sao lưu", 170, true); var bNow = Btn("Sao lưu ngay", 130); var bVerify = Btn("Kiểm tra bản sao lưu", 180); var bRestore = Btn("Khôi phục", 120);
-        bar.Controls.AddRange(new Control[] { bSetup, bNow, bVerify, bRestore });
+        var bSetup = Btn(L.T("Set up backup", "Thiết lập sao lưu"), 170, true); var bNow = Btn(L.T("Back up now", "Sao lưu ngay"), 130); var bVerify = Btn(L.T("Verify backup", "Kiểm tra bản sao lưu"), 180); var bRestore = Btn(L.T("Restore", "Khôi phục"), 120);
+        var bPlain = Btn(L.T("Remove encryption", "Bỏ mã hoá"), 120);
+        bar.Controls.AddRange(new Control[] { bSetup, bNow, bVerify, bRestore, bPlain });
+        bPlain.Click += async (s, e) =>
+        {
+            if (!Backup.Encrypted) { MessageBox.Show(this, L.T("The backup is not encrypted.", "Bản sao lưu hiện không mã hoá."), Text); return; }
+            if (MessageBox.Show(this, L.T("Remove encryption? From this backup on, signing in to GitHub is enough to restore – no password or recovery code needed.\nAnyone with access to your GitHub account can read your memories.", "Bỏ mã hoá? Từ lần sao lưu này, chỉ cần đăng nhập GitHub là khôi phục được, không cần mật khẩu hay mã khôi phục.\nAi vào được tài khoản GitHub của bạn cũng đọc được trí nhớ."), Text, MessageBoxButtons.YesNo) != DialogResult.Yes) return;
+            bPlain.Enabled = false; var r = await Task.Run(() => Backup.DisableEncryption()); bPlain.Enabled = true; FillBackup(); MessageBox.Show(this, r, Text);
+        };
         bSetup.Click += (s, e) => { BackupUI.Setup(this); FillBackup(); };
         bRestore.Click += (s, e) => { BackupUI.Restore(this); FillBackup(); };
         bNow.Click += async (s, e) => { bNow.Enabled = false; var r = await Task.Run(() => Backup.Run(true)); bNow.Enabled = true; FillBackup(); MessageBox.Show(this, r, Text); };
@@ -442,11 +461,11 @@ partial class MainForm
         var w = Backup.Warning();
         var st = Backup.Status();
         bkState.ForeColor = w == null ? Good : Bad;
-        bkState.Text = w == null ? "● Bộ não đang được sao lưu an toàn" : "● " + w;
-        Func<string, string> when = v => { DateTime d; return DateTime.TryParse(v, out d) ? d.ToString("HH:mm dd/MM/yyyy") : "chưa có"; };
+        bkState.Text = w == null ? L.T("● The brain is safely backed up", "● Bộ não đang được sao lưu an toàn") : "● " + w;
+        Func<string, string> when = v => { DateTime d; return DateTime.TryParse(v, out d) ? d.ToString("HH:mm dd/MM/yyyy") : L.T("never", "chưa có"); };
         bkInfo.Text = Backup.Configured
-            ? "Repo: " + st.Repo + "\nSao lưu gần nhất: " + when(st.LastOk) + "\nKiểm tra gần nhất: " + when(st.LastVerified) + "\nTrạm phát tự sao lưu khi trí nhớ thay đổi (10 phút kiểm tra một lần) và tự mở thử bản sao lưu mỗi tuần."
-            : "Chưa thiết lập. Bấm \"Thiết lập sao lưu\" để tạo repo GitHub riêng tư, hoặc \"Khôi phục\" nếu bạn đã có bộ não cũ.";
+            ? "Repo: " + st.Repo + "   (" + (Backup.Encrypted ? L.T("password-encrypted", "có mã hoá bằng mật khẩu") : L.T("not encrypted – GitHub sign-in is enough", "không mã hoá – chỉ cần đăng nhập GitHub")) + L.T(")\nLast backup: ", ")\nSao lưu gần nhất: ") + when(st.LastOk) + L.T("\nLast verified: ", "\nKiểm tra gần nhất: ") + when(st.LastVerified) + L.T("\nThe station backs up automatically when memory changes (checked every 10 minutes) and test-opens the backup weekly.", "\nTrạm phát tự sao lưu khi trí nhớ thay đổi (10 phút kiểm tra một lần) và tự mở thử bản sao lưu mỗi tuần.")
+            : L.T("Not set up. Click \"Set up backup\" to create a private GitHub repo, or \"Restore\" if you already have a brain.", "Chưa thiết lập. Bấm \"Thiết lập sao lưu\" để tạo repo GitHub riêng tư, hoặc \"Khôi phục\" nếu bạn đã có bộ não cũ.");
     }
 
     // ---------- Bảo trì máy (các tính năng dọn dẹp cũ) ----------
@@ -454,41 +473,41 @@ partial class MainForm
     {
         var p = Page();
         var head = new Panel { Dock = DockStyle.Top, Height = 74, BackColor = Bg };
-        btnScan.Text = "Quét toàn bộ"; Style(btnScan, true); btnScan.SetBounds(0, 8, 160, 40);
+        btnScan.Text = L.T("Scan everything", "Quét toàn bộ"); Style(btnScan, true); btnScan.SetBounds(0, 8, 160, 40);
         btnScan.Click += async (s, e) => await Scan();
         lblStatus.SetBounds(172, 6, 800, 42); lblStatus.ForeColor = Ink; lblStatus.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-        lblStatus.Text = "Bấm \"Quét toàn bộ\" để phân loại file trên máy. App chỉ TỰ XOÁ nhóm 1; nhóm 2 bạn tự quyết; nhóm 3 không bao giờ bị đụng tới.";
+        lblStatus.Text = L.T("Click \"Scan everything\" to classify files on this PC. The app only AUTO-DELETES group 1; you decide on group 2; group 3 is never touched.", "Bấm \"Quét toàn bộ\" để phân loại file trên máy. App chỉ TỰ XOÁ nhóm 1; nhóm 2 bạn tự quyết; nhóm 3 không bao giờ bị đụng tới.");
         lblDisk.SetBounds(0, 52, 900, 20); lblDisk.ForeColor = Dim; lblDisk.Font = new Font("Segoe UI", 9f);
         head.Controls.AddRange(new Control[] { btnScan, lblStatus, lblDisk });
 
         // Nhóm 1
         Dark(list); list.CheckBoxes = true; list.Dock = DockStyle.Fill;
-        list.Columns.Add("Mục dọn dẹp (an toàn – app tự xoá được)", 520); list.Columns.Add("Dung lượng", 160);
+        list.Columns.Add(L.T("Cleanup item (safe – the app can delete it)", "Mục dọn dẹp (an toàn – app tự xoá được)"), 520); list.Columns.Add(L.T("Size", "Dung lượng"), 160);
         foreach (var it in items)
         {
             bool on = settings.Loaded ? settings.Selected.Contains(it.Id) : it.DefaultOn;
             list.Items.Add(new ListViewItem(new[] { it.Name, "—" }) { Checked = on, Tag = it });
         }
-        btnClean.Text = "Dọn mục an toàn"; Style(btnClean, true); btnClean.Size = new Size(170, 36); btnClean.Margin = new Padding(0, 0, 8, 0);
+        btnClean.Text = L.T("Clean safe items", "Dọn mục an toàn"); Style(btnClean, true); btnClean.Size = new Size(170, 36); btnClean.Margin = new Padding(0, 0, 8, 0);
         btnClean.Click += async (s, e) => await CleanNow();
         // Nhóm 2
         Dark(review); review.CheckBoxes = true; review.Dock = DockStyle.Fill; review.ShowItemToolTips = true;
-        review.Columns.Add("File / thư mục", 300); review.Columns.Add("Dung lượng", 90); review.Columns.Add("Ngày sửa", 90); review.Columns.Add("Vì sao nên xem xét", 300);
+        review.Columns.Add(L.T("File / folder", "File / thư mục"), 300); review.Columns.Add(L.T("Size", "Dung lượng"), 90); review.Columns.Add(L.T("Modified", "Ngày sửa"), 90); review.Columns.Add(L.T("Why review it", "Vì sao nên xem xét"), 300);
         review.DoubleClick += (s, e) => OpenLocation();
-        btnOpen.Text = "Mở vị trí"; btnRecycle.Text = "Chuyển vào Thùng rác"; btnMove.Text = "Chuyển sang ổ D";
+        btnOpen.Text = L.T("Open location", "Mở vị trí"); btnRecycle.Text = L.T("Move to Recycle Bin", "Chuyển vào Thùng rác"); btnMove.Text = L.T("Move to drive D", "Chuyển sang ổ D");
         foreach (var b in new[] { btnOpen, btnRecycle, btnMove }) { Style(b); b.Size = new Size(b == btnOpen ? 110 : 180, 36); b.Margin = new Padding(0, 0, 8, 0); }
         btnOpen.Click += (s, e) => OpenLocation();
         btnRecycle.Click += async (s, e) => await ReviewAction(false);
         btnMove.Click += async (s, e) => await ReviewAction(true);
         // Nhóm 3
         Dark(keep); keep.Dock = DockStyle.Fill;
-        keep.Columns.Add("Mục", 300); keep.Columns.Add("Dung lượng", 90); keep.Columns.Add("Vì sao cần giữ", 330);
+        keep.Columns.Add(L.T("Item", "Mục"), 300); keep.Columns.Add(L.T("Size", "Dung lượng"), 90); keep.Columns.Add(L.T("Why keep it", "Vì sao cần giữ"), 330);
         foreach (var k in Analyzer.KeepItems()) keep.Items.Add(new ListViewItem(new[] { k.Name, "—", k.Why }) { Tag = k });
         // Nhóm 4
         Dark(stale); stale.CheckBoxes = true; stale.Dock = DockStyle.Fill; stale.ShowItemToolTips = true;
-        stale.Columns.Add("Thư mục", 300); stale.Columns.Add("Dung lượng", 90); stale.Columns.Add("Dùng lần cuối", 100); stale.Columns.Add("Đánh giá", 300);
+        stale.Columns.Add(L.T("Folder", "Thư mục"), 300); stale.Columns.Add(L.T("Size", "Dung lượng"), 90); stale.Columns.Add(L.T("Last used", "Dùng lần cuối"), 100); stale.Columns.Add(L.T("Assessment", "Đánh giá"), 300);
         stale.DoubleClick += (s, e) => OpenStale();
-        btnStaleOpen.Text = "Mở thư mục"; btnStaleRecycle.Text = "Chuyển thư mục đã tích vào Thùng rác";
+        btnStaleOpen.Text = L.T("Open folder", "Mở thư mục"); btnStaleRecycle.Text = L.T("Move checked folders to Recycle Bin", "Chuyển thư mục đã tích vào Thùng rác");
         Style(btnStaleOpen); btnStaleOpen.Size = new Size(120, 36); btnStaleOpen.Margin = new Padding(0, 0, 8, 0);
         Style(btnStaleRecycle); btnStaleRecycle.Size = new Size(290, 36);
         btnStaleOpen.Click += (s, e) => OpenStale();
@@ -503,32 +522,32 @@ partial class MainForm
             tp.Controls.Add(body); tp.Controls.Add(row);
             return tp;
         };
-        tabs.TabPages.Add(tab("1. Xoá an toàn (tự động)", list, new Control[] { btnClean }));
-        tabs.TabPages.Add(tab("2. Cần bạn xem xét", review, new Control[] { btnOpen, btnRecycle, btnMove }));
-        tabs.TabPages.Add(tab("3. Thư mục lâu không dùng", stale, new Control[] { btnStaleOpen, btnStaleRecycle }));
-        tabs.TabPages.Add(tab("4. Cần giữ – không nên xoá", keep, new Control[0]));
+        tabs.TabPages.Add(tab(L.T("1. Safe to delete (automatic)", "1. Xoá an toàn (tự động)"), list, new Control[] { btnClean }));
+        tabs.TabPages.Add(tab(L.T("2. Needs your review", "2. Cần bạn xem xét"), review, new Control[] { btnOpen, btnRecycle, btnMove }));
+        tabs.TabPages.Add(tab(L.T("3. Long-unused folders", "3. Thư mục lâu không dùng"), stale, new Control[] { btnStaleOpen, btnStaleRecycle }));
+        tabs.TabPages.Add(tab(L.T("4. Keep – do not delete", "4. Cần giữ – không nên xoá"), keep, new Control[0]));
 
         // Tự động dọn dẹp
-        var grp = new GroupBox { Text = "Tự động dọn dẹp (chỉ nhóm 1)", Dock = DockStyle.Bottom, Height = 170, ForeColor = Ink };
-        chkAuto.Text = "Bật tự động dọn dẹp (dọn ngầm các mục đang tích ở nhóm 1)"; chkAuto.SetBounds(14, 24, 600, 24);
+        var grp = new GroupBox { Text = L.T("Automatic cleanup (group 1 only)", "Tự động dọn dẹp (chỉ nhóm 1)"), Dock = DockStyle.Bottom, Height = 170, ForeColor = Ink };
+        chkAuto.Text = L.T("Enable automatic cleanup (silently cleans the checked group 1 items)", "Bật tự động dọn dẹp (dọn ngầm các mục đang tích ở nhóm 1)"); chkAuto.SetBounds(14, 24, 600, 24);
         chkAuto.Checked = settings.AutoEnabled && Scheduler.Exists();
-        var lblFreq = new Label { Text = "Tần suất:", Location = new Point(14, 58), AutoSize = true };
+        var lblFreq = new Label { Text = L.T("Frequency:", "Tần suất:"), Location = new Point(14, 58), AutoSize = true };
         cboFreq.DropDownStyle = ComboBoxStyle.DropDownList;
-        cboFreq.Items.AddRange(new object[] { "Hằng ngày", "Mỗi 3 ngày", "Hằng tuần", "Mỗi khi bật máy" });
+        cboFreq.Items.AddRange(new object[] { L.T("Daily", "Hằng ngày"), L.T("Every 3 days", "Mỗi 3 ngày"), L.T("Weekly", "Hằng tuần"), L.T("At every startup", "Mỗi khi bật máy") });
         cboFreq.SelectedIndex = Math.Max(0, Math.Min(3, settings.Frequency));
         cboFreq.SetBounds(90, 54, 170, 28);
-        var lblTime = new Label { Text = "Lúc:", Location = new Point(280, 58), AutoSize = true };
+        var lblTime = new Label { Text = L.T("At:", "Lúc:"), Location = new Point(280, 58), AutoSize = true };
         dtTime.Format = DateTimePickerFormat.Custom; dtTime.CustomFormat = "HH:mm"; dtTime.ShowUpDown = true; dtTime.SetBounds(320, 54, 90, 28);
         DateTime t;
         dtTime.Value = DateTime.TryParse(settings.Time, out t) ? DateTime.Today.Add(t.TimeOfDay) : DateTime.Today.AddHours(12);
         cboFreq.SelectedIndexChanged += (s, e) => dtTime.Enabled = cboFreq.SelectedIndex != 3;
         dtTime.Enabled = cboFreq.SelectedIndex != 3;
-        chkRecycle.Text = "Cho phép tự động dọn cả Thùng rác (không khôi phục được)"; chkRecycle.SetBounds(14, 86, 600, 24); chkRecycle.Checked = settings.AutoRecycle;
-        chkNotify.Text = "Hiện thông báo nhỏ sau mỗi lần tự động dọn"; chkNotify.SetBounds(14, 110, 600, 24); chkNotify.Checked = settings.Notify;
-        btnSave.Text = "Lưu cài đặt"; Style(btnSave); btnSave.SetBounds(640, 24, 140, 34);
+        chkRecycle.Text = L.T("Also empty the Recycle Bin automatically (cannot be undone)", "Cho phép tự động dọn cả Thùng rác (không khôi phục được)"); chkRecycle.SetBounds(14, 86, 600, 24); chkRecycle.Checked = settings.AutoRecycle;
+        chkNotify.Text = L.T("Show a small notification after each automatic cleanup", "Hiện thông báo nhỏ sau mỗi lần tự động dọn"); chkNotify.SetBounds(14, 110, 600, 24); chkNotify.Checked = settings.Notify;
+        btnSave.Text = L.T("Save settings", "Lưu cài đặt"); Style(btnSave); btnSave.SetBounds(640, 24, 140, 34);
         btnSave.Click += (s, e) => SaveSettings();
-        btnLog.Text = "Xem nhật ký"; Style(btnLog); btnLog.SetBounds(790, 24, 120, 34);
-        btnLog.Click += (s, e) => { if (File.Exists(Cleaner.LogFile)) Process.Start("notepad.exe", "\"" + Cleaner.LogFile + "\""); else MessageBox.Show("Chưa có lần dọn nào.", Text); };
+        btnLog.Text = L.T("View log", "Xem nhật ký"); Style(btnLog); btnLog.SetBounds(790, 24, 120, 34);
+        btnLog.Click += (s, e) => { if (File.Exists(Cleaner.LogFile)) Process.Start("notepad.exe", "\"" + Cleaner.LogFile + "\""); else MessageBox.Show(L.T("No cleanups yet.", "Chưa có lần dọn nào."), Text); };
         lblLast.SetBounds(640, 66, 520, 64); lblLast.ForeColor = Dim; lblLast.Font = new Font("Segoe UI", 8.5f);
         grp.Controls.AddRange(new Control[] { chkAuto, lblFreq, cboFreq, lblTime, dtTime, chkRecycle, chkNotify, btnSave, btnLog, lblLast });
 
@@ -543,17 +562,17 @@ partial class MainForm
         try { mc = Memory.Counts(); } catch { mc = Tuple.Create(0, 0); }
         var p = Brain.Progress;
         if (p.Length > 110) p = "…" + p.Substring(p.Length - 110);
-        lblBrain.Text = "Chỉ mục: " + Brain.FileCount.ToString("N0") + " file, " + Brain.ProjectCount + " dự án · cập nhật " +
-            (Brain.BuiltAt == DateTime.MinValue ? "chưa có" : Brain.BuiltAt.ToString("dd/MM/yyyy HH:mm")) +
-            (Brain.Building ? "\n" + p : "\nGõ từ khoá để tìm trên toàn máy (không cần gõ dấu). Nhấp đúp một kết quả để mở vị trí.");
+        lblBrain.Text = L.T("Index: ", "Chỉ mục: ") + Brain.FileCount.ToString("N0") + L.T(" files, ", " file, ") + Brain.ProjectCount + L.T(" projects · updated ", " dự án · cập nhật ") +
+            (Brain.BuiltAt == DateTime.MinValue ? L.T("never", "chưa có") : Brain.BuiltAt.ToString("dd/MM/yyyy HH:mm")) +
+            (Brain.Building ? "\n" + p : L.T("\nType keywords to search the whole PC (accents optional). Double-click a result to open its location.", "\nGõ từ khoá để tìm trên toàn máy (không cần gõ dấu). Nhấp đúp một kết quả để mở vị trí."));
         if (backupTick++ % 5 == 0)
         {
             var w = Backup.Warning();
             int devices = 0;
             try { devices = Activity.Devices(30).Count(d => d.Name != "trạm phát" && d.Name != "sao lưu"); } catch { }
             lblPills.ForeColor = w != null ? Bad : Dim;
-            lblPills.Text = Brain.FileCount.ToString("N0") + " file  ·  " + Brain.ProjectCount + " dự án  ·  " + mc.Item1 + " ghi nhớ  ·  " + mc.Item2 + " liên kết  ·  " +
-                devices + " thiết bị  ·  " + (w == null ? "✓ đã sao lưu" : "⚠ " + w);
+            lblPills.Text = Brain.FileCount.ToString("N0") + L.T(" files  ·  ", " file  ·  ") + Brain.ProjectCount + L.T(" projects  ·  ", " dự án  ·  ") + mc.Item1 + L.T(" memories  ·  ", " ghi nhớ  ·  ") + mc.Item2 + L.T(" links  ·  ", " liên kết  ·  ") +
+                devices + L.T(" devices  ·  ", " thiết bị  ·  ") + (w == null ? L.T("✓ backed up", "✓ đã sao lưu") : "⚠ " + w);
             if (currentPage == "backup") FillBackup();
         }
     }
