@@ -66,6 +66,15 @@ static class Updater
         }
         else using (var wc = Client()) wc.DownloadFile(r.ExeUrl, newExe);
         if (new FileInfo(newExe).Length < 10 * 1024) throw new Exception(L.T("The downloaded file is invalid.", "File tải về không hợp lệ."));
+        // File tải về phải đúng là app ở phiên bản của tag, tránh thay app bằng file hỏng hoặc sai bản
+        Version got;
+        try { got = System.Reflection.AssemblyName.GetAssemblyName(newExe).Version; }
+        catch { try { File.Delete(newExe); } catch { } throw new Exception(L.T("The downloaded file is not a valid app.", "File tải về không phải app hợp lệ.")); }
+        if (got.ToString(3) != r.Version.ToString(3))
+        {
+            try { File.Delete(newExe); } catch { }
+            throw new Exception(L.T("The downloaded app is version ", "App tải về là bản ") + got.ToString(3) + L.T(", expected ", ", cần bản ") + r.Version.ToString(3) + ".");
+        }
 
         string installed = Installer.Exe;   // bản đã cài (lịch tự động và agent dùng chung)
         Func<string, string> q = s => "'" + s.Replace("'", "''") + "'";

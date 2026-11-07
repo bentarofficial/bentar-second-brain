@@ -1,10 +1,11 @@
-# Phát hành một phiên bản: biên dịch, đóng gói .zip và đăng lên GitHub Releases.
+﻿# Phát hành một phiên bản: biên dịch, đóng gói .zip và đăng lên GitHub Releases.
 # Ứng dụng tự cập nhật bằng cách tải file .zip của bản "Latest".
 # Cách dùng:  .\release.ps1 -Version 2.10.0 -Title "Cài đặt người dùng" -Notes "Có gì mới..."
 param(
     [Parameter(Mandatory = $true)][string]$Version,
     [string]$Title = "",
-    [string]$Notes = ""
+    [string]$Notes = "",
+    [switch]$BuildOnly   # chỉ biên dịch và đóng gói, không đăng lên GitHub
 )
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
@@ -29,8 +30,10 @@ $zip = Join-Path $out ("Bentar-Second-Brain-v$Version.zip")
 if (Test-Path $zip) { Remove-Item $zip }
 Compress-Archive -Path $exe, README.md -DestinationPath $zip
 
+if ($BuildOnly) { Write-Host "Đã đóng gói: $zip"; return }
+
 $tag = "v$Version"
 if (-not $Title) { $Title = $tag } else { $Title = "$tag – $Title" }
 gh release create $tag $zip -R $repo --title $Title --notes $Notes
 if ($LASTEXITCODE -ne 0) { throw "Tạo release lỗi." }
-Write-Host "Đã phát hành $tag: $zip"
+Write-Host "Đã phát hành ${tag}: $zip"
