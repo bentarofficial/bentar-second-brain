@@ -9,6 +9,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Web.Script.Serialization;
 
@@ -27,6 +28,13 @@ public class Neuron
     public int Uses { get; set; }
     public bool Outdated { get; set; }
     public List<string> History { get; set; }
+    // Chỉ học điều có bằng chứng: "verified" (app đã tự kiểm tra bằng chứng, hoặc người dùng duyệt),
+    // "candidate" (chờ duyệt – KHÔNG đưa cho agent dùng), "stale" (bằng chứng đã đổi, cần xem lại). Trống = bản cũ, coi như chờ duyệt.
+    public string Status { get; set; }
+    public string Evidence { get; set; }   // mỗi dòng một bằng chứng: file "đường dẫn" "trích dẫn" | commit "repo" mã | url https://… "trích dẫn" | user "lời bạn nói"
+    public string CheckNote { get; set; }  // kết quả kiểm tra gần nhất
+    public DateTime CheckedAt { get; set; }
+    public bool IsVerified { get { return Status == "verified"; } }
 }
 
 public class Synapse
@@ -104,7 +112,8 @@ static class Memory
     {
         return With(false, s => Tuple.Create(
             s.Neurons.Select(n => new Neuron { Id = n.Id, Kind = n.Kind, Title = n.Title, Text = n.Text, Source = n.Source, Tags = n.Tags, Agent = n.Agent,
-                Created = n.Created, Updated = n.Updated, LastUsed = n.LastUsed, Uses = n.Uses, Outdated = n.Outdated }).ToList(),
+                Created = n.Created, Updated = n.Updated, LastUsed = n.LastUsed, Uses = n.Uses, Outdated = n.Outdated,
+                Status = n.Status, Evidence = n.Evidence, CheckNote = n.CheckNote, CheckedAt = n.CheckedAt }).ToList(),
             s.Synapses.Select(y => new Synapse { A = y.A, B = y.B, Weight = EffectiveWeight(y), LastFired = y.LastFired, Why = y.Why }).ToList()));
     }
     // Thay toàn bộ trí nhớ bằng bản khôi phục (giữ khoá để agent khác không ghi chen vào giữa)
@@ -135,6 +144,9 @@ static class Memory
     public static string Label(string kind) { return KindLabel(kind); }
 
     public static Tuple<int, int> Counts() { return With(false, s => Tuple.Create(s.Neurons.Count(n => n.Kind != "file" && n.Kind != "du-an"), s.Synapses.Count)); }
+
+    static readonly HashSet<string> staleIds = new HashSet<string>();
+    public static int PendingCount() { return With(false, s => s.Neurons.Count(n => n.Kind != "file" && n.Kind != "du-an" && !n.IsVerified && !n.Outdated)); }
 
     static Neuron Find(MemoryStore s, string id) { return s.Neurons.FirstOrDefault(n => n.Id == id); }
 
@@ -212,43 +224,62 @@ static class Memory
     }
 
     // ---------- Ghi nhớ ----------
-    public static string Remember(string text, string title, string kind, string source, string tags)
+    public static string Remember(string text, string title, string kind, string source, string tags, string evidence = null)
     {
         if (string.IsNullOrWhiteSpace(text)) throw new ArgumentException(L.T("Text is required to remember.", "Cần nội dung để ghi nhớ."));
+        var secret = Evidence.FindSecret(text + "\n" + title + "\n" + evidence);
+        if (secret != null) throw new ArgumentException(L.T("Refused: this looks like a secret (", "Từ chối: nội dung có vẻ chứa bí mật (") + secret + L.T("). Never store passwords, keys or tokens.", "). Không bao giờ lưu mật khẩu, khoá hay token."));
         string k; if (kind == null || !KindNames.TryGetValue(kind, out k)) k = "ghi-chu";
         if (string.IsNullOrWhiteSpace(title)) { title = text.Trim().Split('\n')[0]; if (title.Length > 80) title = title.Substring(0, 80) + "…"; }
+        // Kiểm tra bằng chứng NGOÀI khoá (có thể tải URL / gọi git); bằng chứng sai thì từ chối hẳn
+        var check = Evidence.Check(evidence, k);
+        if (check.Failed.Count > 0)
+            throw new ArgumentException(L.T("Refused: evidence did not check out – ", "Từ chối: bằng chứng không đúng – ") + string.Join("; ", check.Failed) +
+                L.T(". Fix the evidence (exact quote from the file/page, real commit) and try again.", ". Sửa lại bằng chứng (trích đúng nguyên văn trong file/trang, commit có thật) rồi thử lại."));
+        string status = check.Strong ? "verified" : "candidate";
         return With(true, s =>
         {
             var now = DateTime.UtcNow;
+            // Ghi nhớ chờ duyệt quá 30 ngày mà không ai duyệt thì bỏ (không để rác tích tụ)
+            s.Neurons.RemoveAll(n => n.Kind != "file" && n.Kind != "du-an" && !n.IsVerified && n.Status != "stale" && (now - n.Created).TotalDays > 30);
             var draft = new Neuron { Title = title, Text = text, Tags = tags, Source = source };
             var terms = TermsOf(draft);
-            // Gần trùng một ghi nhớ cũ cùng loại: củng cố ghi nhớ đó thay vì tạo bản sao
+            // Gần trùng một ghi nhớ cũ cùng loại: củng cố thay vì tạo bản sao.
+            // Nhưng điều CHƯA có bằng chứng không bao giờ được ghi đè lên điều ĐÃ xác minh.
             string ft = Brain.Fold(title.Trim());
             var dup = s.Neurons.Where(n => n.Kind == k && !n.Outdated)
                                .Select(n => new { n, sim = Similarity(terms, TermsOf(n)) + (Brain.Fold(n.Title.Trim()) == ft ? 0.3 : 0) })
                                .OrderByDescending(x => x.sim).FirstOrDefault();
+            string conflictWith = null;
             if (dup != null && dup.sim >= 0.65)
             {
                 var n = dup.n;
-                if (n.Text != text) { n.History.Add(n.Updated.ToString("yyyy-MM-dd") + ": " + n.Text); n.Text = text; n.Title = title; }
-                n.Updated = n.LastUsed = now; n.Uses++; n.Outdated = false;
-                return L.T("A similar memory already exists #", "Đã có ghi nhớ gần giống #") + n.Id + L.T(" — reinforced it and updated the content.", " — đã củng cố và cập nhật nội dung mới.");
+                if (!n.IsVerified || status == "verified")
+                {
+                    if (n.Text != text) { n.History.Add(n.Updated.ToString("yyyy-MM-dd") + ": " + n.Text); n.Text = text; n.Title = title; }
+                    n.Status = status; n.Evidence = evidence; n.CheckNote = check.Note; n.CheckedAt = now;
+                    n.Updated = n.LastUsed = now; n.Uses++; n.Outdated = false;
+                    return L.T("A similar memory already exists #", "Đã có ghi nhớ gần giống #") + n.Id + L.T(" — reinforced it. ", " — đã củng cố. ") + StatusLine(n);
+                }
+                conflictWith = n.Id;   // bản mới chưa có bằng chứng: lưu riêng ở hàng chờ, nối với bản đã xác minh
             }
             var neuron = new Neuron { Id = "n" + (++s.NextId), Kind = k, Title = title, Text = text, Source = source, Tags = tags, Agent = AgentName,
-                Created = now, Updated = now, LastUsed = now, History = new List<string>() };
+                Created = now, Updated = now, LastUsed = now, History = new List<string>(), Status = status, Evidence = evidence, CheckNote = check.Note, CheckedAt = now };
             s.Neurons.Add(neuron);
+            if (conflictWith != null) Fire(s, neuron.Id, conflictWith, 1, "đề xuất sửa (chưa có bằng chứng)");
             var links = new List<string>();
-            // Nối với dự án / file nguồn
-            if (!string.IsNullOrWhiteSpace(source))
-                foreach (var src in source.Split(new[] { ';', '\n' }, StringSplitOptions.RemoveEmptyEntries).Select(x => x.Trim()))
-                {
-                    var id = File.Exists(src) ? FileNeuron(s, Path.GetFullPath(src)) : Directory.Exists(src) ? ProjectNeuron(s, Path.GetFullPath(src).TrimEnd('\\')) : null;
-                    if (id == null) continue;
-                    Fire(s, neuron.Id, id, 1.5, "nguồn");
-                    var p = ProjectNeuron(s, src);
-                    if (p != null && p != id) Fire(s, neuron.Id, p, 1, "thuộc dự án");
-                    links.Add(Find(s, id).Title);
-                }
+            // Nối với dự án / file nguồn (và các file dùng làm bằng chứng)
+            Func<string, string> norm = x => { try { return Path.GetFullPath(x.Trim()).TrimEnd('\\'); } catch { return x.Trim(); } };   // D:/a và D:\a là một
+            var srcs = (source ?? "").Split(new[] { ';', '\n' }, StringSplitOptions.RemoveEmptyEntries).Where(x => x.Trim().Length > 0).Select(norm).Concat(check.Files).Distinct(StringComparer.OrdinalIgnoreCase);
+            foreach (var src in srcs)
+            {
+                var id = File.Exists(src) ? FileNeuron(s, Path.GetFullPath(src)) : Directory.Exists(src) ? ProjectNeuron(s, Path.GetFullPath(src).TrimEnd('\\')) : null;
+                if (id == null) continue;
+                Fire(s, neuron.Id, id, 1.5, "nguồn");
+                var p = ProjectNeuron(s, src);
+                if (p != null && p != id) Fire(s, neuron.Id, p, 1, "thuộc dự án");
+                links.Add(Find(s, id).Title);
+            }
             // Tự nối với các ghi nhớ có nội dung gần nhau
             foreach (var x in s.Neurons.Where(n => n != neuron && n.Kind != "file").Select(n => new { n, sim = Similarity(terms, TermsOf(n)) })
                                        .Where(x => x.sim >= 0.15).OrderByDescending(x => x.sim).Take(5))
@@ -256,9 +287,142 @@ static class Memory
                 Fire(s, neuron.Id, x.n.Id, Math.Round(x.sim * 2, 2), "nội dung gần nhau");
                 links.Add("#" + x.n.Id + " " + x.n.Title);
             }
-            return L.T("Remembered #", "Đã ghi nhớ #") + neuron.Id + " (" + KindLabel(k) + "): " + title +
+            return L.T("Saved #", "Đã lưu #") + neuron.Id + " (" + KindLabel(k) + "): " + title + "\n" + StatusLine(neuron) +
+                   (conflictWith != null ? L.T("\nNote: it differs from verified memory #", "\nLưu ý: khác với ghi nhớ đã xác minh #") + conflictWith + L.T(", which stays in use until this one is verified.", ", bản đó vẫn được dùng cho tới khi bản này được xác minh.") : "") +
                    (links.Count > 0 ? L.T("\nLinked to: ", "\nĐã nối với: ") + string.Join(", ", links.Distinct().Take(8)) : "");
         });
+    }
+
+    static string StatusLine(Neuron n)
+    {
+        if (n.IsVerified) return L.T("✓ Verified – shared with every agent. ", "✓ Đã xác minh – mọi agent sẽ dùng được. ") + n.CheckNote;
+        if (n.Status == "stale") return L.T("⚠ Needs review – its evidence changed. ", "⚠ Cần xem lại – bằng chứng đã thay đổi. ") + n.CheckNote;
+        return L.T("⏳ Awaiting approval – NOT shared with agents until verified. ", "⏳ Chờ duyệt – CHƯA chia sẻ cho agent cho tới khi được xác minh. ") + n.CheckNote +
+               L.T(" To verify it, remember again with evidence: file \"<path>\" \"<exact quote>\" (lessons must come from a trusted project), commit \"<repo>\" <hash>, or url https://… \"<exact quote>\". Or the user approves it in the app.",
+                   " Muốn xác minh: gọi remember lại kèm bằng chứng: file \"<đường dẫn>\" \"<trích nguyên văn>\" (bài học phải lấy từ dự án tin cậy), commit \"<repo>\" <mã>, hoặc url https://… \"<trích nguyên văn>\". Hoặc người dùng duyệt trong app.");
+    }
+
+    /// <summary>Người dùng duyệt một ghi nhớ (agent không có quyền này).</summary>
+    public static void Approve(string id)
+    {
+        With(true, s =>
+        {
+            var n = Find(s, id);
+            if (n == null) return 0;
+            n.Status = "verified"; n.CheckNote = L.T("approved by you", "bạn đã duyệt") + " " + DateTime.Now.ToString("dd/MM/yyyy"); n.CheckedAt = DateTime.UtcNow; n.Outdated = false;
+            return 0;
+        });
+    }
+
+    // ---------- Bằng chứng: app tự kiểm tra, không tin lời agent ----------
+    public static class Evidence
+    {
+        public class Result { public bool Strong; public string Note = ""; public List<string> Failed = new List<string>(); public List<string> Files = new List<string>(); }
+
+        static readonly Regex FileRx = new Regex("^file\\s+(?:\"(?<p>[^\"]+)\"|(?<p>\\S+))\\s+\"(?<q>.+)\"\\s*$", RegexOptions.IgnoreCase);
+        static readonly Regex CommitRx = new Regex("^commit\\s+(?:\"(?<r>[^\"]+)\"|(?<r>\\S+))\\s+(?<h>[0-9a-f]{7,40})\\s*$", RegexOptions.IgnoreCase);
+        static readonly Regex UrlRx = new Regex("^url\\s+(?<u>https://\\S+)\\s+\"(?<q>.+)\"\\s*$", RegexOptions.IgnoreCase);
+        static readonly Regex UserRx = new Regex("^user\\s+\"(?<q>.+)\"\\s*$", RegexOptions.IgnoreCase);
+        static readonly Regex SecretRx = new Regex(@"(sk-[A-Za-z0-9_\-]{20,}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_\-]{35}|xox[abpr]-[A-Za-z0-9\-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY|sb_[0-9a-f]{40,}|(?:password|passwd|pwd|mật khẩu|mat khau|api[_-]?key|secret|token)\s*[:=]\s*\S{6,})", RegexOptions.IgnoreCase);
+
+        public static string FindSecret(string s)
+        {
+            var m = SecretRx.Match(s ?? "");
+            if (!m.Success) return null;
+            var v = m.Value; return v.Length > 10 ? v.Substring(0, 6) + "…" : "…";
+        }
+
+        // So khớp trích dẫn: bỏ dấu, bỏ hoa thường, gộp khoảng trắng
+        static string Norm(string s) { return Regex.Replace(Brain.Fold(s ?? "").ToLowerInvariant(), "\\s+", " ").Trim(); }
+        // Trích dẫn phải đủ dài (≥ 20 ký tự) để thật sự chứng minh điều được ghi nhớ, không chỉ là một từ khoá có trên trang
+        public const int MinQuote = 20;
+        public static bool Contains(string haystack, string quote) { var q = Norm(quote); return q.Length >= MinQuote && Norm(haystack).Contains(q); }
+        public static bool TooShort(string quote) { return Norm(quote).Length < MinQuote; }
+
+        public static Result Check(string evidence, string kind)
+        {
+            var r = new Result();
+            var ok = new List<string>(); var weak = new List<string>();
+            foreach (var raw in (evidence ?? "").Split(new[] { '\n', ';' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                var line = raw.Trim(); if (line.Length == 0) continue;
+                Match m;
+                if ((m = FileRx.Match(line)).Success)
+                {
+                    var p = m.Groups["p"].Value; var q = m.Groups["q"].Value;
+                    if (TooShort(q)) { r.Failed.Add(L.T("quote too short (need at least 20 characters of the exact text that proves it): ", "đoạn trích quá ngắn (cần ít nhất 20 ký tự nguyên văn chứng minh điều đó): ") + q); continue; }
+                    if (!File.Exists(p)) { r.Failed.Add(L.T("file not found: ", "không có file: ") + p); continue; }
+                    string text; try { text = Brain.ReadText(p); } catch (Exception ex) { r.Failed.Add(p + ": " + ex.Message); continue; }
+                    if (!Contains(text, q)) { r.Failed.Add(L.T("quote not found in ", "không thấy đoạn trích trong ") + p); continue; }
+                    r.Files.Add(Path.GetFullPath(p));
+                    var t = Trust.Of(p);
+                    // Bài học (cách làm nên theo) chỉ học từ nguồn tin cậy; sự thật/quyết định về chính dự án đó thì file của dự án là đủ
+                    if (t.Level == Trust.Level.Excluded) weak.Add(L.T("file in an excluded source", "file thuộc nguồn bị loại trừ"));
+                    else if (kind == "bai-hoc" && t.Level != Trust.Level.Trusted) weak.Add(L.T("lesson from an unverified source (", "bài học từ nguồn chưa kiểm chứng (") + Path.GetFileName(p) + ")");
+                    else ok.Add(L.T("file checked", "đã kiểm tra file") + " " + Path.GetFileName(p));
+                }
+                else if ((m = CommitRx.Match(line)).Success)
+                {
+                    var repo = m.Groups["r"].Value; var h = m.Groups["h"].Value;
+                    if (!Directory.Exists(repo)) { r.Failed.Add(L.T("repo not found: ", "không có repo: ") + repo); continue; }
+                    if (Git(repo, "cat-file -t " + h).Trim() != "commit") { r.Failed.Add(L.T("commit not found: ", "không có commit: ") + h); continue; }
+                    ok.Add("commit " + h.Substring(0, 7));
+                }
+                else if ((m = UrlRx.Match(line)).Success)
+                {
+                    var u = m.Groups["u"].Value; var q = m.Groups["q"].Value;
+                    if (TooShort(q)) { r.Failed.Add(L.T("quote too short (need at least 20 characters of the exact text that proves it): ", "đoạn trích quá ngắn (cần ít nhất 20 ký tự nguyên văn chứng minh điều đó): ") + q); continue; }
+                    string page;
+                    try { page = Fetch(u); } catch (Exception ex) { r.Failed.Add(L.T("could not open ", "không mở được ") + u + " (" + ex.Message + ")"); continue; }
+                    if (!Contains(page, q)) { r.Failed.Add(L.T("quote not found on ", "không thấy đoạn trích trên ") + u); continue; }
+                    ok.Add(L.T("page checked ", "đã kiểm tra trang ") + new Uri(u).Host);
+                }
+                else if ((m = UserRx.Match(line)).Success) weak.Add(L.T("user's words (needs the user's approval)", "lời người dùng (cần người dùng duyệt)"));
+                else r.Failed.Add(L.T("unknown evidence format: ", "không hiểu dạng bằng chứng: ") + (line.Length > 60 ? line.Substring(0, 60) + "…" : line));
+            }
+            r.Strong = ok.Count > 0 && weak.Count == 0;
+            r.Note = ok.Count == 0 && weak.Count == 0 ? L.T("No evidence given.", "Chưa có bằng chứng.") : string.Join(", ", ok.Concat(weak)) + ".";
+            return r;
+        }
+
+        static string Git(string repo, string args)
+        {
+            try
+            {
+                var psi = new System.Diagnostics.ProcessStartInfo("git", "-C \"" + repo + "\" " + args) { CreateNoWindow = true, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+                using (var p = System.Diagnostics.Process.Start(psi)) { var o = p.StandardOutput.ReadToEnd(); p.WaitForExit(10000); return p.ExitCode == 0 ? o : ""; }
+            }
+            catch { return ""; }
+        }
+
+        static string Fetch(string url)
+        {
+            System.Net.ServicePointManager.SecurityProtocol |= System.Net.SecurityProtocolType.Tls12;
+            var req = (System.Net.HttpWebRequest)System.Net.WebRequest.Create(url);
+            req.Timeout = 12000; req.UserAgent = "BentarSecondBrain-evidence-check"; req.AllowAutoRedirect = true;
+            using (var resp = req.GetResponse()) using (var st = resp.GetResponseStream()) using (var sr = new StreamReader(st, Encoding.UTF8))
+            {
+                var buf = new char[3 * 1024 * 1024]; int n = sr.ReadBlock(buf, 0, buf.Length);
+                var html = new string(buf, 0, n);
+                html = Regex.Replace(html, "<(script|style)[^>]*>.*?</\\1>", " ", RegexOptions.Singleline | RegexOptions.IgnoreCase);
+                return System.Net.WebUtility.HtmlDecode(Regex.Replace(html, "<[^>]+>", " "));
+            }
+        }
+
+        // Bằng chứng file đã đổi kể từ lần kiểm tra trước thì kiểm tra lại; trích dẫn không còn thì chuyển sang "cần xem lại"
+        public static bool StillHolds(Neuron n)
+        {
+            foreach (var raw in (n.Evidence ?? "").Split(new[] { '\n', ';' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                var m = FileRx.Match(raw.Trim());
+                if (!m.Success) continue;
+                var p = m.Groups["p"].Value;
+                if (!File.Exists(p)) { if (Brain.IsOnline(p)) return false; continue; }   // ổ đang rút: không kết luận
+                if (File.GetLastWriteTimeUtc(p) <= n.CheckedAt) continue;
+                try { if (!Contains(Brain.ReadText(p), m.Groups["q"].Value)) return false; } catch { }
+            }
+            return true;
+        }
     }
 
     public static string Revise(string id, string text, bool outdated)
@@ -267,7 +431,11 @@ static class Memory
         {
             var n = Find(s, (id ?? "").Trim().TrimStart('#'));
             if (n == null) throw new ArgumentException(L.T("No memory ", "Không có ghi nhớ ") + id);
-            if (!string.IsNullOrWhiteSpace(text) && text != n.Text) { n.History.Add(n.Updated.ToString("yyyy-MM-dd") + ": " + n.Text); n.Text = text; }
+            if (!string.IsNullOrWhiteSpace(text) && text != n.Text)
+            {
+                n.History.Add(n.Updated.ToString("yyyy-MM-dd") + ": " + n.Text); n.Text = text;
+                if (AgentName != null && n.IsVerified) { n.Status = "candidate"; n.CheckNote = L.T("edited by ", "được sửa bởi ") + AgentName + L.T(" – needs re-verification", " – cần xác minh lại"); }
+            }
             n.Outdated = outdated;
             n.Updated = n.LastUsed = DateTime.UtcNow;
             return L.T("Updated #", "Đã cập nhật #") + n.Id + (outdated ? L.T(" (marked outdated – will fade but is kept)", " (đánh dấu đã cũ – sẽ mờ dần, vẫn giữ lại)") : "") + ".";
@@ -288,8 +456,13 @@ static class Memory
     // ---------- Nhớ lại có liên tưởng ----------
     public class Recalled { public Neuron N; public double Score; public string Via; }
 
-    public static List<Recalled> RecallRaw(string query, int limit, bool touch)
+    static bool Usable(Neuron n, bool includeUnverified) { return n.Kind == "file" || n.Kind == "du-an" || n.IsVerified || includeUnverified; }
+
+    public static List<Recalled> RecallRaw(string query, int limit, bool touch, bool includeUnverified = false)
     {
+        // Ghi nhớ đã xác minh mà bằng chứng đổi (file bị sửa, trích dẫn không còn): chuyển sang "cần xem lại" trước khi dùng
+        With(false, s => { foreach (var n in s.Neurons.Where(n => n.IsVerified && n.Evidence != null).ToList()) if (!Evidence.StillHolds(n)) { staleIds.Add(n.Id); } return 0; });
+        if (staleIds.Count > 0) With(true, s => { foreach (var n in s.Neurons.Where(n => staleIds.Contains(n.Id))) { n.Status = "stale"; n.CheckNote = L.T("its evidence changed on ", "bằng chứng đã thay đổi ngày ") + DateTime.Now.ToString("dd/MM/yyyy"); } staleIds.Clear(); return 0; });
         return With(touch, s =>
         {
             var q = Brain.Tokens(query ?? "").Distinct().ToList();
@@ -297,12 +470,12 @@ static class Memory
             if (q.Count == 0)
             {
                 // Không có từ khoá: trả về các ghi nhớ đang "sáng" nhất
-                foreach (var n in s.Neurons.Where(n => n.Kind != "file" && n.Kind != "du-an").OrderByDescending(n => Vitality(n) * (1 + (n.Updated - DateTime.UtcNow.AddDays(-30)).TotalDays / 30)).Take(limit))
+                foreach (var n in s.Neurons.Where(n => n.Kind != "file" && n.Kind != "du-an" && Usable(n, includeUnverified)).OrderByDescending(n => Vitality(n) * (1 + (n.Updated - DateTime.UtcNow.AddDays(-30)).TotalDays / 30)).Take(limit))
                     scores[n.Id] = new Recalled { N = n, Score = Vitality(n) };
             }
             else
             {
-                foreach (var n in s.Neurons)
+                foreach (var n in s.Neurons.Where(n => Usable(n, includeUnverified)))
                 {
                     var t = TermsOf(n);
                     int hit = q.Count(t.Contains);
@@ -321,7 +494,7 @@ static class Memory
                     {
                         var other = y.A == seed.N.Id ? y.B : y.A;
                         var on = Find(s, other);
-                        if (on == null) continue;
+                        if (on == null || !Usable(on, includeUnverified)) continue;
                         double add = seed.Score * Math.Min(1, EffectiveWeight(y) / 2) * 0.5 * Vitality(on);
                         Recalled r;
                         if (!scores.TryGetValue(other, out r)) scores[other] = r = new Recalled { N = on, Score = 0, Via = "#" + seed.N.Id + " " + seed.N.Title };
@@ -351,9 +524,11 @@ static class Memory
             if (n.Kind != "file" && n.Kind != "du-an") sb.Append(" · ").Append(n.Updated.ToLocalTime().ToString("dd/MM/yyyy"));
             if (n.Uses > 0) sb.Append(L.T(" · recalled ", " · nhớ lại ")).Append(n.Uses).Append(L.T(" times", " lần"));
             if (n.Outdated) sb.Append(L.T(" · OUTDATED", " · ĐÃ CŨ"));
+            if (n.Kind != "file" && n.Kind != "du-an") sb.Append(n.IsVerified ? L.T(" · ✓ verified", " · ✓ đã xác minh") : n.Status == "stale" ? L.T(" · ⚠ needs review", " · ⚠ cần xem lại") : L.T(" · ⏳ unverified", " · ⏳ chưa xác minh"));
             sb.Append("] ").AppendLine(n.Title);
             if (r.Via != null) sb.AppendLine(L.T("  (associated via ", "  (liên tưởng từ ") + r.Via + ")");
             if (!string.IsNullOrEmpty(n.Source)) sb.AppendLine(L.T("  Source: ", "  Nguồn: ") + n.Source);
+            if (full && !string.IsNullOrEmpty(n.Evidence)) sb.AppendLine(L.T("  Evidence: ", "  Bằng chứng: ") + n.Evidence.Replace("\n", " | ") + (string.IsNullOrEmpty(n.CheckNote) ? "" : "  → " + n.CheckNote));
             if (!string.IsNullOrEmpty(n.Text) && n.Kind != "file")
             {
                 var t = n.Text.Trim();
@@ -373,7 +548,7 @@ static class Memory
             var proj = Brain.ProjectOf(path) ?? path;
             string pid = "p:" + Path.GetFullPath(proj).TrimEnd('\\').ToLowerInvariant();
             var ids = new HashSet<string>(s.Synapses.Where(y => y.A == pid || y.B == pid).Select(y => y.A == pid ? y.B : y.A));
-            var list = s.Neurons.Where(n => ids.Contains(n.Id) && n.Kind != "file" && n.Kind != "du-an").OrderByDescending(Vitality).Take(15)
+            var list = s.Neurons.Where(n => ids.Contains(n.Id) && n.Kind != "file" && n.Kind != "du-an" && n.IsVerified).OrderByDescending(Vitality).Take(15)
                          .Select(n => new Recalled { N = n }).ToList();
             var related = s.Synapses.Where(y => (y.A == pid || y.B == pid)).Select(y => new { other = Find(s, y.A == pid ? y.B : y.A), w = EffectiveWeight(y), y.Why })
                            .Where(x => x.other != null && x.other.Kind == "du-an").OrderByDescending(x => x.w).Take(8).ToList();

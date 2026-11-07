@@ -460,9 +460,13 @@ static class Brain
     public static string Copy(string source, string destination)
     {
         source = Path.GetFullPath(source);
+        // Đích kết thúc bằng "\" hoặc "/" nghĩa là "chép vào thư mục này" (tạo thư mục nếu chưa có)
+        bool intoFolder = destination.EndsWith("\\") || destination.EndsWith("/");
         destination = Path.GetFullPath(destination);
         bool isDir = Directory.Exists(source);
         if (!isDir && !File.Exists(source)) throw new FileNotFoundException(L.T("Not found: ", "Không tìm thấy: ") + source);
+        if (intoFolder) Directory.CreateDirectory(destination);
+        else if (!Directory.Exists(Path.GetDirectoryName(destination.TrimEnd('\\')))) Directory.CreateDirectory(Path.GetDirectoryName(destination.TrimEnd('\\')));
         if (Directory.Exists(destination)) destination = Path.Combine(destination, Path.GetFileName(source.TrimEnd('\\')));
         if (File.Exists(destination) || Directory.Exists(destination))
             throw new IOException(L.T("Destination exists; Second Brain does not overwrite: ", "Đích đã tồn tại, Second Brain không ghi đè: ") + destination);
@@ -515,9 +519,18 @@ static class AgentLinks
     static string CodexFile { get { return Path.Combine(Home, ".codex", "config.toml"); } }
 
     // Kết nối với mọi agent có trên máy. onlyExisting = chỉ cập nhật đường dẫn ở những agent đã kết nối từ trước
+    // Nối MCP xong thì cài thêm hook + skill + hướng dẫn, và ghi nhận người dùng muốn nối (để trạm phát tự nối lại nếu bị mất)
+    static string WithExtras(string agent, string result)
+    {
+        if (result == null) return null;
+        try { L.Set("agent." + agent, "1"); var x = AgentHooks.Install(agent); if (x != null) result += " + " + x; } catch (Exception ex) { result += L.T(" (extras failed: ", " (cài thêm lỗi: ") + ex.Message + ")"; }
+        return result;
+    }
+
     public static List<string> ConnectAll(bool onlyExisting)
     {
-        var r = new List<string> { Try("Claude Code", () => ClaudeCode(onlyExisting)) };
+        try { AgentHooks.EnsureShims(); } catch { }
+        var r = new List<string> { Try("Claude Code", () => WithExtras("Claude Code", ClaudeCode(onlyExisting))) };
         bool desktopOpen = ClaudeDesktopRunning();
         foreach (var t in JsonTargets())
         {
@@ -525,15 +538,17 @@ static class AgentLinks
             // Claude Desktop đang mở sẽ ghi đè file cấu hình của nó và làm mất mục vừa thêm
             if (desktopOpen && t.Item1.StartsWith("Claude Desktop") && Directory.Exists(Path.GetDirectoryName(f)))
             { if (!onlyExisting) r.Add(t.Item1 + L.T(": running – fully quit Claude Desktop (including the tray icon) and connect again", ": đang mở – thoát hẳn Claude Desktop (cả biểu tượng ở khay hệ thống) rồi bấm kết nối lại")); continue; }
-            r.Add(Try(t.Item1, () => JsonConnect(f, onlyExisting)));
+            var name = t.Item1;
+            r.Add(Try(name, () => WithExtras(name, JsonConnect(f, onlyExisting))));
         }
-        r.Add(Try("Codex", () => CodexConnect(onlyExisting)));
+        r.Add(Try("Codex", () => WithExtras("Codex", CodexConnect(onlyExisting))));
         return r.Where(x => x != null).ToList();
     }
 
     // Gỡ đúng mục "second-brain" khỏi cấu hình các agent, giữ nguyên mọi thứ khác
     public static List<string> DisconnectAll()
     {
+        foreach (var a in new[] { "Claude Code", "Codex", "Gemini CLI", "Cursor", "Windsurf", "Claude Desktop", "Claude Desktop (bản Store)" }) { L.Set("agent." + a, "0"); AgentHooks.Uninstall(a); }
         var r = new List<string>();
         r.Add(Try("Claude Code", () => Cmd("where claude").Item1 == 0 && Cmd("claude mcp remove --scope user " + ServerName).Item1 == 0 ? L.T("disconnected", "đã ngắt") : null));
         foreach (var t in JsonTargets()) { var f = t.Item2; r.Add(Try(t.Item1, () => JsonDisconnect(f))); }
@@ -573,16 +588,28 @@ static class AgentLinks
 
     public static string Connect(string name)
     {
-        if (name == "Claude Code") return ClaudeCode(false);
-        if (name == "Codex") return CodexConnect(false);
+        try { AgentHooks.EnsureShims(); } catch { }
+        if (name == "Claude Code") return WithExtras(name, ClaudeCode(false));
+        if (name == "Codex") return WithExtras(name, CodexConnect(false));
         if (name.StartsWith("Claude Desktop") && ClaudeDesktopRunning())
             return L.T("Fully quit Claude Desktop (including the tray icon) and try again.", "Hãy thoát hẳn Claude Desktop (cả biểu tượng ở khay hệ thống) rồi thử lại.");
+        foreach (var t in JsonTargets()) if (t.Item1 == name) return WithExtras(name, JsonConnect(t.Item2, false));
+        return null;
+    }
+
+    // Chỉ nối lại MCP (không cài hook/skill/hướng dẫn) – dùng khi tự sửa kết nối cho agent đã nối từ bản cũ
+    public static string ConnectMcpOnly(string name)
+    {
+        if (name == "Claude Code") return ClaudeCode(false);
+        if (name == "Codex") return CodexConnect(false);
+        if (name.StartsWith("Claude Desktop") && ClaudeDesktopRunning()) return null;
         foreach (var t in JsonTargets()) if (t.Item1 == name) return JsonConnect(t.Item2, false);
         return null;
     }
 
     public static string Disconnect(string name)
     {
+        L.Set("agent." + name, "0"); AgentHooks.Uninstall(name);
         if (name == "Claude Code") return Cmd("claude mcp remove --scope user " + ServerName).Item1 == 0 ? L.T("disconnected", "đã ngắt") : null;
         if (name == "Codex")
         {
@@ -736,19 +763,17 @@ static class McpServer
     static StreamWriter output;
     static readonly object writeGate = new object();
 
-    static string Instructions { get { return L.T(
-        "Bentar Second Brain is the shared memory of this whole computer: every hard drive, USB stick and memory card, including documents, notes and source code of ALL projects. " +
-        "When the user mentions documents, research, notes, code or another project outside the current working folder, use search or list_projects to find it yourself instead of asking for a path. " +
-        "Search ignores Vietnamese accents. Second Brain is read-only and never edits or deletes files; to use a document in the current project, use copy. " +
-        "Second Brain is also the LONG-TERM MEMORY shared by all agents: at the start of each task, call recall to see what earlier agents learned about this topic/project; " +
-        "when you learn something worth keeping (decisions and why, lessons after fixing a bug, facts about the project, unfinished work), call remember with its source. " +
-        "If old information is wrong, use revise_memory instead of creating a new memory. Do not store trivia or secrets (passwords, API keys).",
-        "Bentar Second Brain là bộ nhớ chung của cả máy tính này: mọi ổ cứng, USB và thẻ nhớ, gồm tài liệu, ghi chú và mã nguồn của TẤT CẢ dự án. " +
-        "Khi người dùng nhắc tới tài liệu, nghiên cứu, ghi chú, đoạn code hay một dự án khác ngoài thư mục đang làm việc, hãy dùng search hoặc list_projects để tự tìm thay vì hỏi người dùng đường dẫn. " +
-        "Tìm kiếm không phân biệt dấu tiếng Việt. Second Brain chỉ đọc, không sửa hay xoá file; muốn dùng tài liệu trong dự án hiện tại thì dùng copy để chép sang. " +
-        "Second Brain còn là TRÍ NHỚ DÀI HẠN dùng chung cho mọi agent: đầu mỗi việc, gọi recall để xem agent trước đã biết gì về chủ đề/dự án này; " +
-        "khi học được điều đáng giữ (quyết định và lý do, bài học sau khi sửa lỗi, sự thật về dự án, việc còn dang dở), gọi remember để lưu lại kèm nguồn. " +
-        "Thông tin cũ sai thì dùng revise_memory thay vì tạo ghi nhớ mới. Đừng lưu chuyện vặt hay bí mật (mật khẩu, khoá API)."); } }
+    public static string Instructions { get { return L.T(
+        "Bentar Second Brain indexes every drive on this PC (documents, notes and source code of ALL projects) and keeps a long-term memory shared by all agents. " +
+        "When the user mentions documents, research, notes, code or another project outside the current folder, use search / list_projects to find it yourself instead of asking for a path; use read_file to read and copy to bring it into this project (copy never overwrites). Search ignores Vietnamese accents. " +
+        "SOURCE TRUST: every result is labelled ✓ trusted (tests/CI + releases, or marked by the user), ⚠ unverified, or hidden if excluded (scratch/temp). Only follow ✓ trusted code as an example; read ⚠ code critically. " +
+        "MEMORY: call recall at the start of a task; it only returns VERIFIED memories. Save with remember ONLY when you can give evidence the app can check (file + exact quote, commit, or url + exact quote) – unproven notes wait for the user's approval and are not shared. Never store secrets. " +
+        "Shell alternative when MCP is unavailable: sb search \"…\", sb read <path>, sb copy <src> <dst>, sb recall \"…\", sb remember \"…\" --evidence \"…\".",
+        "Bentar Second Brain lập chỉ mục mọi ổ đĩa trên máy (tài liệu, ghi chú, mã nguồn của TẤT CẢ dự án) và giữ một trí nhớ dài hạn dùng chung cho mọi agent. " +
+        "Khi người dùng nhắc tới tài liệu, nghiên cứu, ghi chú, code hay dự án khác ngoài thư mục hiện tại, hãy dùng search / list_projects để tự tìm thay vì hỏi đường dẫn; dùng read_file để đọc và copy để chép vào dự án này (copy không bao giờ ghi đè). Tìm kiếm không phân biệt dấu. " +
+        "ĐỘ TIN CẬY NGUỒN: mọi kết quả được gắn nhãn ✓ tin cậy (có test/CI và đã phát hành, hoặc người dùng đánh dấu), ⚠ chưa kiểm chứng, hoặc bị ẩn nếu bị loại trừ (nháp/tạm). Chỉ học theo code ✓ tin cậy; đọc code ⚠ với thái độ phê phán. " +
+        "TRÍ NHỚ: gọi recall khi bắt đầu việc; nó chỉ trả về ghi nhớ ĐÃ XÁC MINH. Chỉ gọi remember khi đưa được bằng chứng app tự kiểm tra được (file + trích nguyên văn, commit, hoặc url + trích nguyên văn) – điều chưa chứng minh sẽ chờ người dùng duyệt và chưa được chia sẻ. Không bao giờ lưu bí mật. " +
+        "Khi không có MCP, dùng dòng lệnh: sb search \"…\", sb read <đường dẫn>, sb copy <nguồn> <đích>, sb recall \"…\", sb remember \"…\" --evidence \"…\"."); } }
 
     public static void Run()
     {
@@ -865,6 +890,7 @@ static class McpServer
                     { "path", Prop("string", L.T("Only search inside this folder (optional), e.g. D:\\Projects\\abc", "Chỉ tìm bên trong thư mục này (tuỳ chọn), ví dụ D:\\Projects\\abc")) },
                     { "ext", Prop("string", L.T("Only files with this extension (optional), e.g. md, docx, py", "Chỉ tìm file có đuôi này (tuỳ chọn), ví dụ md, docx, py")) },
                     { "name_only", Prop("boolean", L.T("true = match file names only", "true = chỉ tìm theo tên file")) },
+                    { "include_excluded", Prop("boolean", L.T("true = also show scratch/temp/excluded sources (hidden by default)", "true = hiện cả nguồn nháp/tạm/bị loại trừ (mặc định ẩn)")) },
                     { "limit", Prop("integer", L.T("Maximum results (default 20, max 100)", "Số kết quả tối đa (mặc định 20, tối đa 100)")) } }, "query"),
             Tool("list_projects", L.T("List projects on this PC (folders with .git, CLAUDE.md, package.json...) with a summary from README/CLAUDE.md, most recently used first.", "Liệt kê các dự án trên máy (thư mục có .git, CLAUDE.md, package.json...) kèm tóm tắt từ README/CLAUDE.md, mới dùng gần đây xếp trước."),
                 new Dictionary<string, object> { { "filter", Prop("string", L.T("Filter by name/path/summary (optional)", "Lọc theo tên/đường dẫn/tóm tắt (tuỳ chọn)")) } }),
@@ -884,14 +910,17 @@ static class McpServer
             Tool("recall", L.T("Recall what agents have remembered (decisions, lessons, facts, notes) and related projects/files, with associative spreading through the neural network. Call at the start of each task. Leave query empty for recent highlights.", "Nhớ lại những gì các agent đã ghi nhớ (quyết định, bài học, sự thật, ghi chú) và các dự án/file liên quan, có liên tưởng theo mạng nơ-ron. Gọi ở đầu mỗi việc. Để trống query để xem các ghi nhớ nổi bật gần đây."),
                 new Dictionary<string, object> {
                     { "query", Prop("string", L.T("Topic to recall, e.g. 'stripe payments' or a project name", "Chủ đề cần nhớ lại, ví dụ 'thanh toán momo' hoặc tên dự án")) },
-                    { "limit", Prop("integer", L.T("Maximum memories (default 10)", "Số ghi nhớ tối đa (mặc định 10)")) } }),
-            Tool("remember", L.T("Save something worth keeping into the long-term memory shared by all agents. Links automatically to the source project/file and similar memories; a near-duplicate reinforces the existing memory.", "Lưu một điều đáng nhớ vào trí nhớ dài hạn dùng chung cho mọi agent. Tự nối với dự án/file nguồn và các ghi nhớ gần nghĩa; nếu gần trùng ghi nhớ cũ thì củng cố ghi nhớ đó."),
+                    { "limit", Prop("integer", L.T("Maximum memories (default 10)", "Số ghi nhớ tối đa (mặc định 10)")) },
+                    { "include_unverified", Prop("boolean", L.T("true = also show memories still awaiting verification (do NOT treat them as facts)", "true = hiện cả ghi nhớ chưa xác minh (KHÔNG coi là sự thật)")) } }),
+            Tool("remember", L.T("Save something worth keeping into the long-term memory shared by all agents. ONLY memories with evidence the app can check itself are shared: give evidence as one or more lines – file \"<path>\" \"<exact quote from it>\" | commit \"<repo folder>\" <hash> | url https://… \"<exact quote from the page>\" | user \"<what the user said>\". The app opens the file/commit/page to confirm; false evidence is refused. Lessons (how to do things) only count from TRUSTED projects (tests/CI + releases, or marked trusted by the user). Without strong evidence the memory waits for the user's approval and is NOT shared.",
+                "Lưu một điều đáng nhớ vào trí nhớ dài hạn dùng chung cho mọi agent. CHỈ ghi nhớ có bằng chứng mà app tự kiểm tra được mới được chia sẻ: ghi bằng chứng thành một hoặc nhiều dòng – file \"<đường dẫn>\" \"<trích nguyên văn>\" | commit \"<thư mục repo>\" <mã> | url https://… \"<trích nguyên văn trên trang>\" | user \"<lời người dùng nói>\". App tự mở file/commit/trang để xác nhận; bằng chứng sai sẽ bị từ chối. Bài học (cách làm) chỉ được tính khi lấy từ dự án TIN CẬY (có test/CI và đã phát hành, hoặc người dùng đánh dấu tin cậy). Không đủ bằng chứng thì ghi nhớ chờ người dùng duyệt và CHƯA được chia sẻ."),
                 new Dictionary<string, object> {
                     { "text", Prop("string", L.T("What to remember, written so another agent understands it without context", "Nội dung cần nhớ, viết đủ ý để agent khác hiểu mà không cần ngữ cảnh")) },
                     { "title", Prop("string", L.T("Short title (optional)", "Tiêu đề ngắn (tuỳ chọn)")) },
                     { "kind", Prop("string", L.T("decision | lesson | fact | todo | note (default note)", "decision | lesson | fact | todo | note (mặc định note)")) },
                     { "source", Prop("string", L.T("Related file or project folder paths, separated by ';' (recommended)", "Đường dẫn file hoặc thư mục dự án liên quan, nhiều cái cách nhau bằng ';' (nên có)")) },
-                    { "tags", Prop("string", L.T("Extra keywords to help recall (optional)", "Từ khoá bổ sung để dễ nhớ lại (tuỳ chọn)")) } }, "text"),
+                    { "tags", Prop("string", L.T("Extra keywords to help recall (optional)", "Từ khoá bổ sung để dễ nhớ lại (tuỳ chọn)")) },
+                    { "evidence", Prop("string", L.T("Evidence lines the app will check, e.g. file \"D:\\proj\\README.md\" \"exact sentence\" or commit \"D:\\proj\" a4c38fc", "Các dòng bằng chứng để app kiểm tra, ví dụ file \"D:\\proj\\README.md\" \"câu nguyên văn\" hoặc commit \"D:\\proj\" a4c38fc")) } }, "text", "evidence"),
             Tool("revise_memory", L.T("Edit a memory or mark it outdated/wrong. The old version stays in history; outdated memories fade instead of being deleted.", "Sửa nội dung một ghi nhớ hoặc đánh dấu nó đã cũ/sai. Bản cũ được giữ trong lịch sử; ghi nhớ đã cũ mờ dần chứ không bị xoá."),
                 new Dictionary<string, object> {
                     { "id", Prop("string", L.T("Memory id, e.g. n12", "Mã ghi nhớ, ví dụ n12")) },
@@ -929,31 +958,40 @@ static class McpServer
             case "search":
             {
                 var q = S(a, "query") ?? "";
-                var hits = Brain.Search(q, S(a, "path"), S(a, "ext"), B(a, "name_only"), Math.Max(1, Math.Min(100, I(a, "limit", 20))));
+                int limit = Math.Max(1, Math.Min(100, I(a, "limit", 20)));
+                bool all = B(a, "include_excluded") || !string.IsNullOrEmpty(S(a, "path"));   // tìm trong thư mục chỉ định = người dùng muốn xem cả nguồn bị loại trừ
+                var hits = Brain.Search(q, S(a, "path"), S(a, "ext"), B(a, "name_only"), Math.Min(300, limit * 3))
+                    .Select(h => new { h, t = Trust.Of(h.File.Path) })
+                    .Where(x => all || x.t.Level != Trust.Level.Excluded)
+                    .OrderByDescending(x => x.h.Score + (x.t.Level == Trust.Level.Trusted ? 15 : 0)).Take(limit).ToList();
                 if (hits.Count == 0) return L.T("No results for \"", "Không tìm thấy kết quả cho \"") + q + "\"." + Note();
                 sb.AppendLine(L.T("Found ", "Tìm thấy ") + hits.Count + L.T(" results for \"", " kết quả cho \"") + q + "\":");
-                foreach (var h in hits)
+                foreach (var x in hits)
                 {
+                    var h = x.h;
                     sb.AppendLine().Append("• ").Append(h.File.Path);
                     sb.Append("  (" + Cleaner.Fmt(h.File.Size) + L.T(", modified ", ", sửa ") + DateTime.FromBinary(h.File.Mtime).ToString("dd/MM/yyyy") + ")");
                     if (!Brain.IsOnline(h.File.Path)) sb.Append(L.T("  [drive not connected]", "  [ổ đang không cắm]"));
                     sb.AppendLine();
                     var proj = ProjectOf(h.File.Path);
                     if (proj != null) sb.AppendLine(L.T("  Project: ", "  Dự án: ") + proj);
+                    sb.AppendLine(L.T("  Source trust: ", "  Độ tin cậy nguồn: ") + Trust.Tag(x.t));
                     if (h.Snippet != null) foreach (var l in h.Snippet.Split('\n')) sb.AppendLine("    " + l.TrimEnd());
                 }
                 var mem = Memory.RecallRaw(q, 3, false).Where(r => r.N.Kind != "file").ToList();
                 if (mem.Count > 0) sb.AppendLine().AppendLine(L.T("Related memories (call recall for more):", "Ghi nhớ liên quan (gọi recall để xem thêm):")).AppendLine(Memory.Format(mem, false));
+                sb.AppendLine().Append(L.T("Only follow ✓ trusted sources as examples; ⚠ unverified code may be untested – read it critically and never cite it as a lesson.",
+                    "Chỉ học theo nguồn ✓ tin cậy; code ⚠ chưa kiểm chứng có thể chưa được test – đọc có phê phán và đừng lấy làm bài học."));
                 return sb.ToString().TrimEnd() + Note();
             }
             case "recall":
             {
-                var list = Memory.RecallRaw(S(a, "query"), Math.Max(1, Math.Min(50, I(a, "limit", 10))), true);
+                var list = Memory.RecallRaw(S(a, "query"), Math.Max(1, Math.Min(50, I(a, "limit", 10))), true, B(a, "include_unverified"));
                 if (list.Count == 0) return L.T("No memories about \"", "Chưa có ghi nhớ nào về \"") + S(a, "query") + L.T("\" yet. When you learn something worth keeping, use remember.", "\". Khi học được điều đáng giữ, hãy dùng remember.");
                 return L.T("Recalled ", "Nhớ lại được ") + list.Count + L.T(" items:\n", " ý:\n") + Memory.Format(list, true);
             }
             case "remember":
-                return Memory.Remember(S(a, "text"), S(a, "title"), S(a, "kind"), S(a, "source"), S(a, "tags"));
+                return Memory.Remember(S(a, "text"), S(a, "title"), S(a, "kind"), S(a, "source"), S(a, "tags"), S(a, "evidence"));
             case "revise_memory":
                 return Memory.Revise(S(a, "id"), S(a, "text"), B(a, "outdated"));
             case "connect":
@@ -967,6 +1005,7 @@ static class McpServer
                 {
                     sb.AppendLine().AppendLine("• " + p.Name + " — " + p.Path + (Brain.IsOnline(p.Path) ? "" : L.T("  [drive not connected]", "  [ổ đang không cắm]")));
                     sb.AppendLine(L.T("  Last used: ", "  Dùng gần nhất: ") + p.LastWrite.ToString("dd/MM/yyyy") + L.T(" · Markers: ", " · Dấu hiệu: ") + p.Markers);
+                    sb.AppendLine(L.T("  Trust: ", "  Độ tin cậy: ") + Trust.Tag(Trust.Of(p.Path)));
                     if (!string.IsNullOrEmpty(p.Summary)) sb.AppendLine("  " + p.Summary);
                 }
                 return sb.ToString().TrimEnd() + Note();
@@ -976,7 +1015,7 @@ static class McpServer
                 var path = S(a, "path");
                 if (!Directory.Exists(path)) throw new DirectoryNotFoundException(L.T("Folder not found: ", "Không tìm thấy thư mục: ") + path);
                 var di = new DirectoryInfo(path);
-                sb.AppendLine(L.T("Project: ", "Dự án: ") + di.FullName).AppendLine().AppendLine(L.T("Top-level contents:", "Nội dung cấp đầu:"));
+                sb.AppendLine(L.T("Project: ", "Dự án: ") + di.FullName).AppendLine(L.T("Trust: ", "Độ tin cậy: ") + Trust.Tag(Trust.Of(di.FullName))).AppendLine().AppendLine(L.T("Top-level contents:", "Nội dung cấp đầu:"));
                 foreach (var e in di.GetFileSystemInfos().OrderBy(e => !(e is DirectoryInfo)).ThenBy(e => e.Name).Take(200))
                     sb.AppendLine("  " + (e is DirectoryInfo ? e.Name + "\\" : e.Name + "  (" + Cleaner.Fmt(((FileInfo)e).Length) + ")"));
                 foreach (var n in new[] { "CLAUDE.md", "AGENTS.md", "README.md", "README.txt", "README" })

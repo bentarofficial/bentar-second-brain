@@ -66,6 +66,32 @@ claude mcp add --scope user second-brain -- "$env:LOCALAPPDATA\Programs\Bentar S
 
 Tools available to agents: `search`, `list_projects`, `project_overview`, `read_file`, `list_dir`, `copy`, `index_status`, plus the memory tools `recall`, `remember`, `revise_memory`, `connect`.
 
+### Agents actually use it (not just "connected")
+
+Connecting an agent (Settings → **Agents & CLI** → **Connect** / **Connect all**) installs four things, so the agent doesn't have to remember Second Brain exists:
+
+| | What it does | Agents |
+|---|---|---|
+| **MCP server** | The tools above | Claude Code, Claude Desktop, Cursor, Windsurf, Codex, Gemini CLI |
+| **Hooks** | At session start and on every prompt, the app adds verified memories and matching documents from other projects to the agent's context automatically (takes ~2 s, adds nothing when nothing is relevant) | Claude Code, Codex, Gemini CLI |
+| **Skill + instructions** | A `second-brain` skill (Agent Skills standard) and a short managed block in `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, `~/.gemini/GEMINI.md` | Claude Code, Codex, Gemini CLI |
+| **`sb` command** | The same tools from any shell, for agents without MCP (Aider, Copilot, scripts) | Any agent that can run commands |
+
+```bash
+sb search "release notes"          # find docs/code anywhere (accents ignored)
+sb read "D:\proj\README.md" 1 40   # read a file
+sb copy "D:\other\spec.md" docs\   # bring it into this project (never overwrites)
+sb recall "payments"               # verified memories only
+```
+
+Codex asks you to approve new hooks once: run `/hooks` in Codex. Open a **new** agent session after connecting. If an agent update wipes its config, the background station reconnects it within 30 minutes.
+
+### Only learns what is proven
+
+- **Trusted sources.** Every project is scored from checkable signals: tests, CI, releases, recent maintenance, docs. Code with tests or CI that is also released or maintained is **✓ trusted**; the rest is **⚠ unverified**; scratch, temp and archive folders are **excluded** and hidden from agents. Search results carry these labels, and agents are told to follow only trusted code. You decide in Settings → **Trusted sources** (Trust / Exclude / Auto).
+- **Evidence-gated memory.** `remember` needs evidence the app checks itself: `file "<path>" "<exact quote, 20+ characters>"`, `commit "<repo>" <hash>`, or `url https://… "<exact quote>"`. False evidence is refused, and so are secrets (keys, tokens, passwords). Lessons only count from trusted projects.
+- **Nothing unproven is shared.** Memories without strong evidence wait as **⏳ awaiting approval** on the Memory page (Approve / Delete) and are never given to agents. Unapproved ones are dropped after 30 days. A verified memory whose evidence changes (file edited, quote gone) becomes **⚠ needs review** and stops being shared.
+
 ### Memory that learns like a brain
 
 Second Brain is long-term memory shared by all agents, stored in `%LOCALAPPDATA%\BentarSecondBrain\tri-nho.json` (your files are never touched):
@@ -118,6 +144,8 @@ On first launch the app asks: restore an existing brain, create a new one and ba
 - `/auto`: silent cleanup using saved settings (used by Task Scheduler).
 - `/report <file>`: scan only, delete nothing, and write the classification to a file.
 - `/mcp`: run the MCP server over stdio for coding agents.
+- `--cli <command> …` (also `/cli`): the `sb` command – `search`, `read`, `ls`, `projects`, `overview`, `copy`, `recall`, `remember`, `status`. Run `sb help`.
+- `--hook` (also `/hook`): agent hook; reads the hook event JSON on stdin and prints context JSON. Use the `--` forms from Git Bash, which rewrites arguments starting with `/`.
 - `/index`: update the Second Brain index and exit.
 - `/connect`: install into AppData and connect Second Brain to every agent on the machine.
 - `/install`: install on this machine.

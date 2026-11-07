@@ -13,7 +13,7 @@ using System.Windows.Forms;
 
 [assembly: System.Reflection.AssemblyTitle("Bentar Second Brain")]
 [assembly: System.Reflection.AssemblyProduct("Bentar Second Brain")]
-[assembly: System.Reflection.AssemblyVersion("2.9.2.0")]
+[assembly: System.Reflection.AssemblyVersion("2.10.0.0")]
 
 // Cập nhật từ GitHub Releases: so sánh tag (vd "v2.1.0") với phiên bản app, tải file .exe mới rồi tự thay thế
 static class Updater
@@ -978,6 +978,12 @@ partial class MainForm : Form
     {
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
+        // /hook: agent gọi khi mở phiên / mỗi lần người dùng hỏi; /cli: lệnh "sb" cho mọi agent chạy được shell
+        // Nhận cả dạng --hook/--cli: Git Bash tự đổi đối số bắt đầu bằng "/" thành đường dẫn (vd. /cli -> C:/Program Files/Git/cli)
+        Func<string, bool> mode = m => args.Length > 0 && (args[0].Equals("/" + m, StringComparison.OrdinalIgnoreCase) || args[0].Equals("--" + m, StringComparison.OrdinalIgnoreCase)
+                                       || args[0].Replace('\\', '/').EndsWith("/Git/" + m, StringComparison.OrdinalIgnoreCase));
+        if (mode("hook")) { AgentHooks.RunHook(); return; }
+        if (mode("cli")) { Environment.Exit(AgentHooks.RunCli(args.Skip(1).ToArray())); return; }
         Scheduler.MigrateFromOldName();
         if (args.Any(a => a.Equals("/auto", StringComparison.OrdinalIgnoreCase))) { RunAuto(); return; }
         // /report <file>: chỉ quét (không xoá gì) và ghi kết quả phân loại ra file

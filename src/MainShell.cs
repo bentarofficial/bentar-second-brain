@@ -253,17 +253,19 @@ partial class MainForm
         cboKind.Items.AddRange(new object[] { L.T("All kinds", "Mọi loại"), L.T("Decision", "Quyết định"), L.T("Lesson", "Bài học"), L.T("Fact", "Sự thật"), L.T("To-do", "Việc cần làm"), L.T("Note", "Ghi chú") });
         cboKind.SelectedIndex = 0;
         txtMemFilter.Width = 300; txtMemFilter.Margin = new Padding(0, 6, 8, 0); Dark(txtMemFilter);
+        var bOk = Btn(L.T("Approve", "Duyệt"), 90);
         var bEdit = Btn(L.T("Edit", "Sửa"), 80); var bOld = Btn(L.T("Mark outdated", "Đánh dấu đã cũ"), 140); var bDel = Btn(L.T("Delete", "Xoá"), 80); var bRef = Btn(L.T("Refresh", "Làm mới"), 90);
-        bar.Controls.AddRange(new Control[] { cboKind, txtMemFilter, bEdit, bOld, bDel, bRef });
+        bar.Controls.AddRange(new Control[] { cboKind, txtMemFilter, bOk, bEdit, bOld, bDel, bRef });
         Dark(memList);
         memList.Dock = DockStyle.Fill;
-        memList.Columns.Add(L.T("Kind", "Loại"), 100); memList.Columns.Add(L.T("Title", "Tiêu đề"), 360); memList.Columns.Add("Agent", 110); memList.Columns.Add(L.T("Updated", "Cập nhật"), 95); memList.Columns.Add(L.T("Recalls", "Nhớ lại"), 70); memList.Columns.Add(L.T("Source", "Nguồn"), 300);
+        memList.Columns.Add(L.T("Status", "Trạng thái"), 120); memList.Columns.Add(L.T("Kind", "Loại"), 100); memList.Columns.Add(L.T("Title", "Tiêu đề"), 360); memList.Columns.Add("Agent", 110); memList.Columns.Add(L.T("Updated", "Cập nhật"), 95); memList.Columns.Add(L.T("Recalls", "Nhớ lại"), 70); memList.Columns.Add(L.T("Source", "Nguồn"), 300);
         var detail = new Label { Dock = DockStyle.Bottom, Height = 96, ForeColor = Ink, BackColor = Panel2, Padding = new Padding(12, 8, 12, 8), Font = new Font("Segoe UI", 9.5f),
             Text = L.T("Select a memory to see its content. Agents save memories with the remember tool; only you can delete them.", "Chọn một ghi nhớ để xem nội dung. Agent ghi nhớ bằng công cụ remember; chỉ bạn mới xoá được ghi nhớ.") };
         memList.SelectedIndexChanged += (s, e) =>
         {
             var n = memList.SelectedItems.Count > 0 ? memList.SelectedItems[0].Tag as Neuron : null;
-            if (n != null) detail.Text = n.Title + (n.Outdated ? L.T("  (outdated)", "  (đã cũ)") : "") + "\n" + n.Text;
+            if (n != null) detail.Text = n.Title + (n.Outdated ? L.T("  (outdated)", "  (đã cũ)") : "") + "\n" + n.Text +
+                (string.IsNullOrEmpty(n.Evidence) ? "" : L.T("\nEvidence: ", "\nBằng chứng: ") + n.Evidence.Replace("\n", " | ")) + (string.IsNullOrEmpty(n.CheckNote) ? "" : "  → " + n.CheckNote);
         };
         cboKind.SelectedIndexChanged += (s, e) => FillMemories();
         txtMemFilter.TextChanged += (s, e) => FillMemories();
@@ -275,6 +277,7 @@ partial class MainForm
             var text = Prompt(L.T("Edit memory", "Sửa ghi nhớ"), n.Title, n.Text);
             if (text != null) { Memory.Revise(n.Id, text, n.Outdated); FillMemories(); }
         };
+        bOk.Click += (s, e) => { var n = sel(); if (n == null) return; Memory.Approve(n.Id); FillMemories(); };
         bOld.Click += (s, e) => { var n = sel(); if (n == null) return; Memory.Revise(n.Id, null, !n.Outdated); FillMemories(); };
         bDel.Click += (s, e) =>
         {
@@ -297,10 +300,11 @@ partial class MainForm
         foreach (var n in all.Where(n => n.Kind != "file" && n.Kind != "du-an" && (kind == "" || n.Kind == kind)).OrderByDescending(n => n.Updated))
         {
             if (q.Count > 0) { var t = new HashSet<string>(Brain.Tokens(n.Title + " " + n.Text + " " + n.Tags)); if (!q.All(t.Contains)) continue; }
-            memList.Items.Add(new ListViewItem(new[] { Memory.Label(n.Kind), n.Title, n.Agent ?? "", n.Updated.ToLocalTime().ToString("dd/MM/yyyy"), n.Uses.ToString(), n.Source ?? "" })
+            var st = n.IsVerified ? L.T("✓ verified", "✓ đã xác minh") : n.Status == "stale" ? L.T("⚠ needs review", "⚠ cần xem lại") : L.T("⏳ awaiting approval", "⏳ chờ duyệt");
+            memList.Items.Add(new ListViewItem(new[] { st, Memory.Label(n.Kind), n.Title, n.Agent ?? "", n.Updated.ToLocalTime().ToString("dd/MM/yyyy"), n.Uses.ToString(), n.Source ?? "" })
                 { Tag = n, ForeColor = n.Outdated ? Dim : Ink });
         }
-        if (memList.Items.Count == 0) memList.Items.Add(new ListViewItem(new[] { "", L.T("No memories yet. Agents save memories as they work (remember tool).", "Chưa có ghi nhớ nào. Agent sẽ ghi nhớ khi làm việc (công cụ remember)."), "", "", "", "" }) { ForeColor = Dim });
+        if (memList.Items.Count == 0) memList.Items.Add(new ListViewItem(new[] { "", "", L.T("No memories yet. Agents save memories as they work (remember tool).", "Chưa có ghi nhớ nào. Agent sẽ ghi nhớ khi làm việc (công cụ remember)."), "", "", "", "" }) { ForeColor = Dim });
         memList.EndUpdate();
     }
 

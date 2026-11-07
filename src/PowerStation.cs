@@ -170,6 +170,9 @@ static class PowerStation
         // Giữ bộ não cả đời: sao lưu khi trí nhớ thay đổi, tự kiểm tra bản sao lưu mỗi tuần
         var backup = new Timer(_ => { try { if (L.On("autobackup", true)) Backup.Tick(); } catch { } }, null, TimeSpan.FromMinutes(2), TimeSpan.FromMinutes(10));
         GC.KeepAlive(backup);
+        // Tự nối lại các agent người dùng đã chọn nếu cấu hình bị mất (vd. agent cập nhật và xoá mục MCP)
+        var heal = new Timer(_ => { try { AgentHooks.Heal(); } catch { } }, null, TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(30));
+        GC.KeepAlive(heal);
         while (true)
         {
             TcpClient c;
@@ -368,6 +371,17 @@ static class PowerStation
                         { "version", Updater.Current.ToString(3) }, { "files", Brain.FileCount }, { "projects", Brain.ProjectCount },
                         { "memories", mc.Item1 }, { "links", mc.Item2 },
                         { "devices", Activity.Devices(30).Select(d => new Dictionary<string, object> { { "name", d.Name }, { "lastSeen", d.LastSeen.ToString("o") }, { "uses", d.Uses }, { "channels", d.Channels } }).ToList() } }));
+                    return;
+                }
+                // Ngữ cảnh cho hook của agent (SessionStart / UserPromptSubmit / BeforeAgent)
+                if (r.Path == "/api/context")
+                {
+                    var body = r.Body.Length > 0 ? Json.DeserializeObject(Encoding.UTF8.GetString(r.Body)) as Dictionary<string, object> : null;
+                    Func<string, string> g = k => { object v; return body != null && body.TryGetValue(k, out v) ? v as string : (q.ContainsKey(k) ? q[k] : null); };
+                    string ev = g("event") ?? "UserPromptSubmit";
+                    var ctx = AgentHooks.BuildContext(ev, g("cwd"), g("prompt"));
+                    Activity.Log(client, "hook", ev, ctx.Length > 0 ? ctx.Length + L.T(" chars of context", " ký tự ngữ cảnh") : L.T("nothing relevant", "không có gì liên quan"));
+                    Write(ns, 200, "application/json", Json.Serialize(new Dictionary<string, object> { { "context", ctx } }));
                     return;
                 }
                 if (r.Path == "/api/tools") { Write(ns, 200, "application/json", Json.Serialize(McpServer.Tools())); return; }

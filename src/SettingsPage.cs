@@ -129,6 +129,8 @@ partial class MainForm
         public bool HasGh, BackupOn, Encrypted, Station, AutoStart, Schedule;
         public string GhUser, Repo, LastOk;
         public List<AgentLinks.Agent> Agents = new List<AgentLinks.Agent>();
+        public List<Tuple<BrainProject, Trust.Info>> Sources = new List<Tuple<BrainProject, Trust.Info>>();
+        public int Pending;
     }
 
     async void RefreshSettings()
@@ -146,6 +148,8 @@ partial class MainForm
                 try { x.HasGh = Backup.HasGh; if (x.HasGh) x.GhUser = Backup.GhUser(); } catch { }
                 try { x.BackupOn = Backup.Configured; x.Encrypted = Backup.Encrypted; var st = Backup.Status(); x.Repo = st.Repo; x.LastOk = st.LastOk; } catch { }
                 try { x.Agents = AgentLinks.List(); } catch { }
+                try { x.Sources = Brain.Projects(null).Take(15).Select(p => Tuple.Create(p, Trust.Of(p.Path))).ToList(); } catch { }
+                try { x.Pending = Memory.PendingCount(); } catch { }
                 try { x.Station = PowerStation.IsRunning(); } catch { }
                 try { x.AutoStart = Installer.AutoStart; } catch { }
                 try { x.Schedule = Scheduler.Exists(); } catch { }
@@ -245,6 +249,25 @@ partial class MainForm
             Row(L.T("All agents", "Tất cả agent"), L.T("Open a NEW agent session after changing connections.", "Sau khi đổi kết nối, mở phiên agent MỚI để có hiệu lực."), null,
                 Btn2(L.T("Connect all", "Kết nối tất cả"), false, () => Act(() => { if (!Installer.IsInstalled) Installer.Install(); return string.Join("\n", AgentLinks.ConnectAll(false)); })),
                 Btn2(L.T("Disconnect all", "Ngắt tất cả"), false, () => { if (Ask(L.T("Disconnect Second Brain from every agent?", "Ngắt Second Brain khỏi mọi agent?"))) Act(() => string.Join("\n", AgentLinks.DisconnectAll())); }));
+        }
+
+        // ----- Nguồn tin cậy: agent chỉ học theo nguồn đã kiểm chứng -----
+        Section(L.T("Trusted sources (what agents may learn from)", "Nguồn tin cậy (agent được học theo)"));
+        if (x == null) Row(L.T("Projects", "Dự án"), "", State(wait, Dim));
+        else
+        {
+            Row(L.T("Memories awaiting your approval", "Ghi nhớ chờ bạn duyệt"),
+                L.T("Agents' notes without checkable evidence are not shared until you approve them (Memory page).", "Ghi chú của agent chưa có bằng chứng kiểm tra được sẽ không được chia sẻ cho tới khi bạn duyệt (trang Trí nhớ)."),
+                State(x.Pending.ToString(), x.Pending > 0 ? Accent : Dim), Btn2(L.T("Review", "Xem duyệt"), x.Pending > 0, () => ShowPage("memory")));
+            foreach (var t in x.Sources)
+            {
+                var path = t.Item1.Path; var lv = t.Item2.Level;
+                var stateText = lv == Trust.Level.Trusted ? "✓ " + Trust.Label(lv) : lv == Trust.Level.Excluded ? "✗ " + Trust.Label(lv) : "⚠ " + Trust.Label(lv);
+                Row(t.Item1.Name, path + "  ·  " + string.Join(", ", t.Item2.Signals), State(stateText, lv == Trust.Level.Trusted ? Good : lv == Trust.Level.Excluded ? Bad : Dim),
+                    t.Item2.ByUser ? Btn2(L.T("Auto", "Tự chấm"), false, () => Act(() => { Trust.Set(path, "auto"); return null; }))
+                                   : Btn2(L.T("Trust", "Tin cậy"), false, () => Act(() => { Trust.Set(path, "trusted"); return null; })),
+                    Btn2(L.T("Exclude", "Loại trừ"), false, () => Act(() => { Trust.Set(path, lv == Trust.Level.Excluded && t.Item2.ByUser ? "auto" : "excluded"); return null; })));
+            }
         }
 
         // ----- Chia sẻ dữ liệu -----
