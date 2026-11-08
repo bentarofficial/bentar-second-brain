@@ -41,7 +41,6 @@ class OfficeView : Control
     class Flyer { public Staff To; public float Start; public Color C; }
     readonly List<Flyer> flyers = new List<Flyer>();
     // Trưởng phòng mang báo cáo tới Chỉ huy
-    float walkStart = -100; string walkReport;
 
     const float W = 17, H = 13;   // kích thước sàn (ô)
     float tile = 60, ox, oy;
@@ -181,9 +180,7 @@ class OfficeView : Control
                 if (e.T > lastSeenEvent && work)
                 {
                     st.Bubble = Short(e.Action, e.Detail); st.BubbleUntil = DateTime.Now.AddSeconds(5);
-                    if (st.Key != "brain" || e.Channel != "engine") flyers.Add(new Flyer { To = st, Start = T, C = st.Shirt });
-                    if (st.Key == "brain" && e.Channel == "engine" && (e.Action == "xong" || e.Action == "done" || e.Action == "lỗi" || e.Action == "error"))
-                    { walkStart = T; walkReport = e.Action == "xong" || e.Action == "done" ? L.T("Report: done ✓", "Báo cáo: đã xong ✓") : L.T("Report: a problem", "Báo cáo: có lỗi"); }
+                    ReactWithWalk(st, e, recent);
                 }
             }
             if (recent.Count > 0) lastSeenEvent = recent.Max(x => x.T);
@@ -314,7 +311,8 @@ class OfficeView : Control
         Furniture(night);
         foreach (var s in Team) StaffDesk(s);
         Boss();
-        Walker();
+        IdleWalks();
+        Walkers();
         foreach (var kv in queue.OrderBy(k => k.Key)) kv.Value(g);
         DrawFlyers(g);
         foreach (var s in Team) DrawBubble(g, s);
@@ -524,6 +522,7 @@ class OfficeView : Control
                 s.Hit = RectAround(P(x + 0.9f, y + 0.5f, 0.6f), tile * 1.3f, tile * 1.1f);
                 return;
             }
+            if (OnErrand(s)) return;   // đang đi việc: ghế trống, người được vẽ ở chỗ đang đứng
             Person(g, s, cx, cy, 0.45f, working, asleep, false, 0);
             s.Hit = RectAround(P(cx, cy, 1.1f), tile * 0.9f, tile * 1.2f);
             if (s == hover || s == Selected)
@@ -693,24 +692,130 @@ class OfficeView : Control
         });
     }
 
-    // Trưởng phòng mang báo cáo tới Chỉ huy rồi quay về
-    void Walker()
+    // ---------- Đi lại thật trong văn phòng ----------
+    // Nhân viên rời ghế, đi theo lối đi giữa các dãy bàn tới nơi cần (kho tri thức, bàn đồng nghiệp, phòng Chỉ huy),
+    // dừng lại nói chuyện / lấy tài liệu, rồi ôm tài liệu đi về ghế.
+    class Stop { public PointF P; public float Wait; public string Say; public bool Carry; }
+    class Errand { public Staff Who; public List<Stop> Path = new List<Stop>(); public float Start; }
+    readonly List<Errand> errands = new List<Errand>();
+    const float WalkSpeed = 2.0f;           // ô sàn / giây
+    const float Corridor = 5.85f;           // lối đi dọc bên trái khu bàn
+    static float Aisle(float y) { return y <= 3.6f ? 3.6f : y <= 7.95f ? 7.95f : 11.2f; }   // các lối đi ngang
+    static PointF Chair(Staff s) { return new PointF(s.DeskX + 1.95f, s.DeskY + 0.5f); }
+    static PointF Beside(Staff s) { return new PointF(s.DeskX + 1.95f, s.DeskY + 1.4f); }
+    static readonly PointF Vault = new PointF(14.4f, 1.55f), BossSpot = new PointF(5.0f, 2.6f);
+    bool OnErrand(Staff s) { return errands.Any(e => e.Who == s); }
+
+    // Đường đi: ra lối đi ngang gần nhất → (đổi lối qua hành lang dọc nếu cần) → tới đích
+    static IEnumerable<PointF> Route(PointF a, PointF b)
     {
-        float t = T - walkStart; if (t < 0 || t > 9) return;
-        var brain = Team[0];
-        PointF[] path = { new PointF(brain.DeskX + 1.95f, brain.DeskY + 0.9f), new PointF(5.9f, 4.0f), new PointF(5.0f, 2.6f) };
-        float pos; bool atBoss = false;
-        if (t < 3) pos = t / 3; else if (t < 6) { pos = 1; atBoss = true; } else pos = 1 - (t - 6) / 3;
-        float seg = pos * (path.Length - 1); int i = Math.Min(path.Length - 2, (int)seg); float f = seg - i;
-        float wx = path[i].X + (path[i + 1].X - path[i].X) * f, wy = path[i].Y + (path[i + 1].Y - path[i].Y) * f;
-        Q(wx, wy, g =>
+        float ya = Aisle(a.Y), yb = Aisle(b.Y);
+        yield return new PointF(a.X, ya);
+        if (ya != yb) { yield return new PointF(Corridor, ya); yield return new PointF(Corridor, yb); }
+        yield return new PointF(b.X, yb);
+        yield return b;
+    }
+
+    /// <summary>Giao cho một nhân viên một chuyến đi: các điểm dừng (đích, thời gian dừng, câu nói, có ôm tài liệu khi rời đi không).</summary>
+    void Send(Staff s, params Tuple<PointF, float, string, bool>[] stops)
+    {
+        if (s == null || OnErrand(s)) return;
+        var e = new Errand { Who = s, Start = T };
+        var cur = Chair(s); e.Path.Add(new Stop { P = cur });
+        bool carry = false;
+        foreach (var st in stops.Concat(new[] { Tuple.Create(Chair(s), 0f, (string)null, false) }))
         {
-            Shadow(g, wx, wy, 0.35f, 0.35f, 55);
-            Person(g, brain, wx, wy, 0, false, false, true, atBoss ? 0 : T * 9);
-            var hand = P(wx - 0.15f, wy + 0.1f, 0.95f);
-            using (var b = new SolidBrush(Color.White)) g.FillRectangle(b, hand.X - tile * 0.1f, hand.Y - tile * 0.12f, tile * 0.18f, tile * 0.22f);
-            if (atBoss && walkReport != null) Bubble(g, P(wx, wy, 1.9f), walkReport, Color.FromArgb(99, 102, 241));
-        });
+            foreach (var p in Route(cur, st.Item1)) e.Path.Add(new Stop { P = p, Carry = carry });
+            var last = e.Path[e.Path.Count - 1]; last.Wait = st.Item2; last.Say = st.Item3;
+            carry = st.Item4; last.Carry = carry;
+            cur = st.Item1;
+        }
+        errands.Add(e);
+        if (errands.Count > 6) errands.RemoveAt(0);
+    }
+
+    // Vị trí hiện tại của chuyến đi: đang đi (walking) hay đang dừng nói chuyện (say)
+    bool Where(Errand e, out PointF pos, out bool walking, out string say, out bool carry)
+    {
+        float t = T - e.Start; pos = e.Path[0].P; walking = false; say = null; carry = false;
+        for (int i = 1; i < e.Path.Count; i++)
+        {
+            var a = e.Path[i - 1].P; var b = e.Path[i].P;
+            float d = (float)Math.Sqrt((b.X - a.X) * (b.X - a.X) + (b.Y - a.Y) * (b.Y - a.Y)) / WalkSpeed;
+            carry = e.Path[i - 1].Carry;
+            if (t < d) { float f = d > 0 ? t / d : 1; pos = new PointF(a.X + (b.X - a.X) * f, a.Y + (b.Y - a.Y) * f); walking = true; return true; }
+            t -= d;
+            if (t < e.Path[i].Wait) { pos = b; say = e.Path[i].Say; carry = e.Path[i].Carry; return true; }
+            t -= e.Path[i].Wait;
+        }
+        return false;   // đã về tới ghế
+    }
+
+    void Walkers()
+    {
+        foreach (var e in errands.ToList())
+        {
+            PointF pos; bool walking; string say; bool carry;
+            if (!Where(e, out pos, out walking, out say, out carry)) { errands.Remove(e); continue; }
+            var s = e.Who; float wx = pos.X, wy = pos.Y;
+            Q(wx, wy, g =>
+            {
+                Shadow(g, wx, wy, 0.35f, 0.35f, 55);
+                Person(g, s, wx, wy, 0, false, false, true, walking ? T * 9 : 0);
+                if (carry)
+                {
+                    // Ôm một tập hồ sơ trước ngực
+                    var hand = P(wx, wy, 0.95f);
+                    using (var b = new SolidBrush(Color.FromArgb(250, 246, 230))) g.FillRectangle(b, hand.X - tile * 0.13f, hand.Y - tile * 0.1f, tile * 0.24f, tile * 0.18f);
+                    using (var b = new SolidBrush(s.Shirt)) g.FillRectangle(b, hand.X - tile * 0.13f, hand.Y - tile * 0.1f, tile * 0.24f, tile * 0.04f);
+                }
+                s.Hit = RectAround(P(wx, wy, 1.1f), tile * 0.9f, tile * 1.2f);
+                if (say != null) Bubble(g, P(wx, wy, 2.1f), say, s.Shirt);
+            });
+        }
+    }
+
+    // Mỗi việc thật được diễn thành một chuyến đi thật:
+    //  - Trưởng phòng nhận việc từ Chỉ huy → mang tới bàn Claude Code giao việc → về chỗ
+    //  - Xong việc: Trưởng phòng ôm báo cáo tới phòng Chỉ huy
+    //  - Nhân viên dùng công cụ tra cứu: đi tới Kho tri thức lấy hồ sơ → ôm về bàn
+    //  - Hai người cùng làm trong lúc gần nhau: người sau sang bàn người trước xin tài liệu
+    void ReactWithWalk(Staff st, ActivityEntry e, List<ActivityEntry> recent)
+    {
+        var a = (e.Action ?? "").ToLowerInvariant();
+        string detail = string.IsNullOrEmpty(e.Detail) ? "" : (e.Detail.Length > 26 ? e.Detail.Substring(0, 26) + "…" : e.Detail);
+        if (st.Key == "brain" && e.Channel == "engine")
+        {
+            if (a == "xong" || a == "done" || a == "lỗi" || a == "error")
+                Send(st, Tuple.Create(BossSpot, 3.5f, a == "xong" || a == "done" ? L.T("Report: done ✓", "Báo cáo: đã xong ✓") : L.T("Report: a problem", "Báo cáo: có lỗi"), false));
+            else
+            {
+                var coder = Team.FirstOrDefault(x => x.Key == "claude");
+                Send(st, Tuple.Create(BossSpot, 2.2f, L.T("Got it, boss!", "Rõ thưa sếp!"), true),
+                         Tuple.Create(Beside(coder), 2.5f, a == "task" ? L.T("New task for you 📋", "Việc mới cho bạn đây 📋") : L.T("Can you look this up? 🔎", "Tra giúp mình cái này 🔎"), false));
+            }
+            return;
+        }
+        if (!st.Present) { flyers.Add(new Flyer { To = st, Start = T, C = st.Shirt }); return; }
+        // Đồng nghiệp vừa làm việc trong 20 giây trước → sang bàn xin tài liệu
+        var mate = Team.FirstOrDefault(x => x != st && x.Present && x.Key != "brain" && !OnErrand(x) && (e.T - x.LastWork).TotalSeconds > 0 && (e.T - x.LastWork).TotalSeconds < 20);
+        if (mate != null && !OnErrand(st))
+            Send(st, Tuple.Create(Beside(mate), 2.4f, L.T("Can I borrow your notes? 📄", "Cho mình mượn tài liệu nhé 📄"), true));
+        else if (!OnErrand(st))
+            Send(st, Tuple.Create(Vault, 1.8f, (detail.Length > 0 ? "📂 " + detail : L.T("Fetching files 📂", "Lấy hồ sơ 📂")), true));
+        else flyers.Add(new Flyer { To = st, Start = T, C = st.Shirt });   // đang bận đi rồi: hồ sơ bay tới
+    }
+
+    // Một chút sống động khi không có việc thật: thỉnh thoảng có người đi pha cà phê
+    float nextIdleWalk = 20;
+    void IdleWalks()
+    {
+        if (T < nextIdleWalk) return;
+        nextIdleWalk = T + 35 + (float)(new Random().NextDouble() * 40);
+        var idle = Team.Where(s => s.Present && !s.Working && !OnErrand(s) && s.Key != "brain").ToList();
+        if (idle.Count == 0) return;
+        var who = idle[new Random().Next(idle.Count)];
+        Send(who, Tuple.Create(new PointF(1.2f, 10.9f), 2.5f, L.T("Coffee break ☕", "Đi pha cà phê ☕"), false));
     }
 
     void DrawFlyers(Graphics g)
