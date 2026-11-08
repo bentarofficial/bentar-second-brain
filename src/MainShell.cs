@@ -44,7 +44,7 @@ partial class MainForm
         var logo = new Label { Text = "Bentar\nSecond Brain", Dock = DockStyle.Top, Height = 78, ForeColor = Ink, Font = new Font("Segoe UI", 15f, FontStyle.Bold), Padding = new Padding(18, 14, 0, 0) };
         var nav = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, BackColor = Side, Padding = new Padding(10, 6, 10, 0) };
         var navItems = new[] {
-            Tuple.Create("brain", L.T("◉   Brain", "◉   Bộ não")), Tuple.Create("chat", L.T("✧   Chat", "✧   Trò chuyện")), Tuple.Create("search", L.T("⌕   Search", "⌕   Tìm kiếm")), Tuple.Create("memory", L.T("✦   Memory", "✦   Trí nhớ")),
+            Tuple.Create("brain", L.T("◉   Brain", "◉   Bộ não")), Tuple.Create("office", L.T("▦   Office", "▦   Phòng làm việc")), Tuple.Create("chat", L.T("✧   Chat", "✧   Trò chuyện")), Tuple.Create("search", L.T("⌕   Search", "⌕   Tìm kiếm")), Tuple.Create("memory", L.T("✦   Memory", "✦   Trí nhớ")),
             Tuple.Create("activity", L.T("⚡   Activity", "⚡   Hoạt động")), Tuple.Create("socket", L.T("⇄   Sockets", "⇄   Ổ cắm")), Tuple.Create("backup", L.T("☁   Backup", "☁   Sao lưu")),
             Tuple.Create("maintain", L.T("⚙   PC maintenance", "⚙   Bảo trì máy")) };
         foreach (var it in navItems)
@@ -90,6 +90,7 @@ partial class MainForm
         top.Controls.Add(lblPills); top.Controls.Add(lblPageTitle);
 
         pages["brain"] = BuildBrainPage();
+        pages["office"] = BuildOfficePage();
         pages["chat"] = BuildChatPage();
         pages["search"] = BuildSearchPage();
         pages["memory"] = BuildMemoryPage();
@@ -112,7 +113,7 @@ partial class MainForm
     }
 
     static readonly Dictionary<string, string> PageTitles = new Dictionary<string, string> {
-        { "brain", L.T("Brain", "Bộ não") }, { "chat", L.T("Chat with your brain", "Trò chuyện với bộ não") }, { "search", L.T("Search the whole PC", "Tìm trên toàn máy") }, { "memory", L.T("Memory", "Trí nhớ") }, { "activity", L.T("Activity", "Hoạt động") },
+        { "brain", L.T("Brain", "Bộ não") }, { "office", L.T("Office – your AI team", "Phòng làm việc – đội AI của bạn") }, { "chat", L.T("Chat with your brain", "Trò chuyện với bộ não") }, { "search", L.T("Search the whole PC", "Tìm trên toàn máy") }, { "memory", L.T("Memory", "Trí nhớ") }, { "activity", L.T("Activity", "Hoạt động") },
         { "socket", L.T("Sockets – plug in agents and tools", "Ổ cắm – cắm agent và công cụ") }, { "backup", L.T("Brain backup", "Sao lưu bộ não") }, { "maintain", L.T("PC maintenance", "Bảo trì máy") }, { "settings", L.T("Settings", "Cài đặt") } };
 
     void ShowPage(string key)
