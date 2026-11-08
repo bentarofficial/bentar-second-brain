@@ -407,7 +407,10 @@ static class Backup
             var r = Git("clone \"" + repoUrl + "\" \"" + RepoDir + "\"", Cleaner.DataDir);
             if (r.Item1 != 0) throw new InvalidOperationException(L.T("Could not fetch the repo: ", "Không lấy được repo: ") + r.Item2);
             try { EnsureSafeTarget(repoUrl, RepoDir); } catch { DeleteTree(RepoDir); throw; }
-            if (File.Exists(Path.Combine(RepoDir, KeyName)) || File.Exists(Path.Combine(RepoDir, DataName)) || File.Exists(Path.Combine(RepoDir, PlainName)))
+            // Repo đã có bản sao lưu KHÔNG mã hoá và lần này cũng không mã hoá: sao lưu tiếp lên trên (bản cũ vẫn trong lịch sử git).
+            // Bản có mã hoá thì phải Khôi phục, vì khoá phải khớp.
+            bool continuePlain = plain && File.Exists(Path.Combine(RepoDir, PlainName)) && !File.Exists(Path.Combine(RepoDir, KeyName)) && !File.Exists(Path.Combine(RepoDir, DataName));
+            if (!continuePlain && (File.Exists(Path.Combine(RepoDir, KeyName)) || File.Exists(Path.Combine(RepoDir, DataName)) || File.Exists(Path.Combine(RepoDir, PlainName))))
                 throw new InvalidOperationException(L.T("This repo already has a backup. Use \"Restore\" instead of setting up again.", "Repo này đã có bản sao lưu. Hãy dùng \"Khôi phục\" thay vì thiết lập mới."));
             if (plain)
             {
