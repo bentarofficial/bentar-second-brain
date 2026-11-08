@@ -107,12 +107,19 @@ static class ClaudeEngine
     // Mọi model hiện tại đều nhận đủ 5 mức effort: low, medium, high, xhigh, max.
     public static readonly Tuple<string, string, string>[] Models = {
         Tuple.Create("", "Mặc định", "Default"),
-        Tuple.Create("fable", "Fable — mạnh nhất", "Fable — most capable"),
-        Tuple.Create("opus", "Opus — cân bằng", "Opus — balanced"),
-        Tuple.Create("sonnet", "Sonnet — nhanh", "Sonnet — fast"),
-        Tuple.Create("haiku", "Haiku — rất nhanh, rẻ", "Haiku — fastest, cheapest") };
+        Tuple.Create("claude-fable-5-1", "Fable 5.1 — mạnh nhất", "Fable 5.1 — most capable"),
+        Tuple.Create("claude-opus-5-5", "Opus 5.5 — cân bằng", "Opus 5.5 — balanced"),
+        Tuple.Create("claude-sonnet-5-5", "Sonnet 5.5 — nhanh", "Sonnet 5.5 — fast"),
+        Tuple.Create("claude-haiku-5-5", "Haiku 5.5 — rất nhanh, rẻ", "Haiku 5.5 — fastest, cheapest") };
+    /// <summary>Model đã chọn; lựa chọn cũ dạng bí danh (opus, sonnet…) được đổi sang mã đầy đủ có số phiên bản.</summary>
+    public static string ModelPref()
+    {
+        var m = L.Get("chat.model", "");
+        var full = Models.FirstOrDefault(x => x.Item1 != "" && x.Item1.Contains("-" + m + "-"));
+        return m.Length > 0 && !m.StartsWith("claude-") && full != null ? full.Item1 : m;
+    }
     public static readonly string[] Efforts = { "low", "medium", "high", "xhigh", "max" };
-    public static string DefaultEffort(string model) { return model == "opus" || model == "haiku" ? "medium" : model == "" ? null : "high"; }
+    public static string DefaultEffort(string model) { return model.Contains("opus") || model.Contains("haiku") ? "medium" : model == "" ? null : "high"; }
 
     // Không bao giờ cho agent tự làm những việc khó đảo ngược hoặc lộ ra ngoài
     static readonly string[] Forbidden = {
@@ -177,7 +184,7 @@ static class ClaudeEngine
         }
         args.Add("--disallowedTools"); args.AddRange(Forbidden);
         // Model và mức effort người dùng chọn dưới ô chat (trống = để Claude Code dùng mặc định của model)
-        var model = L.Get("chat.model", ""); var effort = L.Get("chat.effort", "");
+        var model = ModelPref(); var effort = L.Get("chat.effort", "");
         if (model != "" && Models.Any(m => m.Item1 == model)) { args.Add("--model"); args.Add(model); }
         if (Efforts.Contains(effort)) { args.Add("--effort"); args.Add(effort); }
         if (!string.IsNullOrEmpty(resume)) { args.Add("--resume"); args.Add(resume); if (fork) args.Add("--fork-session"); }

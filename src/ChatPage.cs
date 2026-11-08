@@ -200,7 +200,7 @@ partial class MainForm
         var effort = new EffortSlider { Dock = DockStyle.Left, Width = 250, BackColor = Panel2 };
         Action syncModel = () =>
         {
-            var m = L.Get("chat.model", "");
+            var m = ClaudeEngine.ModelPref();
             var item = ClaudeEngine.Models.FirstOrDefault(x => x.Item1 == m) ?? ClaudeEngine.Models[0];
             bModel.Text = "◆ " + (L.Vi ? item.Item2 : item.Item3).Split('—')[0].Trim() + "  ▾";
             effort.DefaultLevel = ClaudeEngine.DefaultEffort(m);
@@ -209,7 +209,7 @@ partial class MainForm
         bModel.Click += (s, e) =>
         {
             var menu = new ContextMenuStrip { Renderer = new DarkMenu(), ShowImageMargin = false, Font = new Font("Segoe UI", 10f) };
-            var cur = L.Get("chat.model", "");
+            var cur = ClaudeEngine.ModelPref();
             foreach (var m in ClaudeEngine.Models)
             {
                 var id = m.Item1;
