@@ -98,11 +98,19 @@ class ChatTree : Control
 // Thanh kéo mức effort: Tự động (mặc định của model) · low · medium · high · xhigh · max
 class EffortSlider : Control
 {
-    static readonly string[] Stops = { null, "low", "medium", "high", "xhigh", "max" };
-    int idx; bool drag;
+    string[] Stops = { null, "low", "medium", "high", "xhigh", "max" };
+    int idx; bool drag; string wanted;          // wanted: mức người dùng đã chọn (giữ lại khi đổi qua model không có mức đó)
     public string DefaultLevel;                 // mức mặc định của model đang chọn (để hiện ở nấc Tự động)
     public event Action<string> Changed;
-    public string Level { get { return Stops[idx]; } set { idx = Math.Max(0, Array.IndexOf(Stops, string.IsNullOrEmpty(value) ? null : value)); Invalidate(); } }
+    public string Level { get { return Stops[idx]; } set { wanted = string.IsNullOrEmpty(value) ? null : value; idx = Math.Max(0, Array.IndexOf(Stops, wanted)); Invalidate(); } }
+    /// <summary>Đổi model: thanh chỉ còn các nấc model đó nhận; không có nấc nào thì khoá lại.</summary>
+    public void SetModel(string[] efforts, string def)
+    {
+        Stops = new string[] { null }.Concat(efforts ?? new string[0]).ToArray();
+        DefaultLevel = def; Enabled = Stops.Length > 1;
+        idx = Math.Max(0, Array.IndexOf(Stops, wanted));
+        Invalidate();
+    }
     readonly ToolTip tip = new ToolTip();
     public EffortSlider()
     {
@@ -111,14 +119,14 @@ class EffortSlider : Control
         tip.SetToolTip(this, L.T("How hard Claude thinks. Higher = smarter on hard tasks, slower and uses more of your plan. Auto = the model's default.",
             "Claude suy nghĩ kỹ tới đâu. Cao hơn = giỏi hơn với việc khó, nhưng chậm hơn và tốn hạn mức hơn. Tự động = mặc định của model."));
     }
-    const int LabelW = 104;
+    const int LabelW = 140;
     RectangleF Track { get { return new RectangleF(LabelW + 8, Height / 2f - 2, Width - LabelW - 20, 4); } }
     float X(int i) { var t = Track; return t.X + t.Width * i / (Stops.Length - 1); }
     void SetFrom(int x)
     {
         var t = Track; int i = (int)Math.Round((x - t.X) / t.Width * (Stops.Length - 1));
         i = Math.Max(0, Math.Min(Stops.Length - 1, i));
-        if (i != idx) { idx = i; Invalidate(); if (Changed != null) Changed(Stops[idx]); }
+        if (i != idx) { idx = i; wanted = Stops[idx]; Invalidate(); if (Changed != null) Changed(Stops[idx]); }
     }
     protected override void OnMouseDown(MouseEventArgs e) { drag = true; SetFrom(e.X); base.OnMouseDown(e); }
     protected override void OnMouseMove(MouseEventArgs e) { if (drag) SetFrom(e.X); base.OnMouseMove(e); }
@@ -128,6 +136,11 @@ class EffortSlider : Control
     {
         var g = e.Graphics; g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
         g.Clear(BackColor);
+        if (Stops.Length < 2)
+        {
+            TextRenderer.DrawText(g, L.T("Effort: not supported by this model", "Effort: model này không hỗ trợ"), new Font("Segoe UI", 8.5f), ClientRectangle, Theme.Dim, TextFormatFlags.VerticalCenter | TextFormatFlags.Left);
+            return;
+        }
         string name = idx == 0 ? L.T("Auto", "Tự động") + (DefaultLevel != null ? " (" + DefaultLevel + ")" : "") : Stops[idx];
         TextRenderer.DrawText(g, L.T("Effort: ", "Effort: ") + name, new Font("Segoe UI", 8.5f, FontStyle.Bold), new Rectangle(4, 0, LabelW + 4, Height), idx >= 4 ? Theme.Accent : Theme.Dim,
             TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.EndEllipsis);
@@ -197,26 +210,40 @@ partial class MainForm
         Round.Button(bAsk, 17); Round.Button(bStop, 17);
         // Chọn model (menu) + thanh kéo effort, nhớ lựa chọn cho các lần sau
         var bModel = Btn("", 150); bModel.Dock = DockStyle.Left; bModel.BackColor = Panel2;
-        var effort = new EffortSlider { Dock = DockStyle.Left, Width = 250, BackColor = Panel2 };
+        var effort = new EffortSlider { Dock = DockStyle.Left, Width = 290, BackColor = Panel2 };
         Action syncModel = () =>
         {
-            var m = ClaudeEngine.ModelPref();
-            var item = ClaudeEngine.Models.FirstOrDefault(x => x.Item1 == m) ?? ClaudeEngine.Models[0];
-            bModel.Text = "◆ " + (L.Vi ? item.Item2 : item.Item3).Split('—')[0].Trim() + "  ▾";
-            effort.DefaultLevel = ClaudeEngine.DefaultEffort(m);
-            effort.Invalidate();
+            var mi = ClaudeEngine.FindModel(ClaudeEngine.ModelPref());
+            bModel.Text = "◆ " + (mi != null ? mi.Name : L.T("Default", "Mặc định")) + "  ▾";
+            // Thanh effort chỉ còn những nấc model này nhận; model không có effort thì khoá lại
+            effort.SetModel(mi != null ? mi.Efforts : ClaudeEngine.AllEfforts, mi != null ? mi.DefaultEffort : null);
         };
         bModel.Click += (s, e) =>
         {
             var menu = new ContextMenuStrip { Renderer = new DarkMenu(), ShowImageMargin = false, Font = new Font("Segoe UI", 10f) };
             var cur = ClaudeEngine.ModelPref();
+            Action<string, string, string> add = (id, text, note) =>
+                menu.Items.Add(new ToolStripMenuItem((cur == id ? "✓  " : "     ") + text + (note != null ? "      " + note : ""), null, (s2, e2) => { L.Set("chat.model", id); syncModel(); }) { ForeColor = Ink });
+            add("", L.T("Default (Claude Code picks)", "Mặc định (Claude Code tự chọn)"), null);
+            string fam = null;
             foreach (var m in ClaudeEngine.Models)
             {
-                var id = m.Item1;
-                menu.Items.Add(new ToolStripMenuItem((cur == id ? "✓  " : "     ") + (L.Vi ? m.Item2 : m.Item3), null, (s2, e2) => { L.Set("chat.model", id); syncModel(); }) { ForeColor = Ink });
+                if (m.Family != fam) { menu.Items.Add(new ToolStripSeparator()); fam = m.Family; }
+                string note = m.Note == "credit" ? L.T("ⓘ needs usage credits", "ⓘ cần tín dụng sử dụng") : m.Efforts.Length == 0 ? L.T("no effort", "không có effort") : null;
+                add(m.Id, m.Name, note);
             }
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add(new ToolStripMenuItem(L.T("↻  Refresh model list", "↻  Tải lại danh sách model"), null, async (s2, e2) =>
+            {
+                bModel.Text = L.T("◆ Loading…", "◆ Đang tải…");
+                bool ok = await ClaudeEngine.RefreshModels();
+                syncModel();
+                if (!ok) Say(L.T("Couldn't fetch the model list from Anthropic (sign in to Claude first). Using the built-in list.", "Chưa lấy được danh sách model từ Anthropic (cần đăng nhập Claude). Đang dùng danh sách có sẵn."), Dim);
+            }) { ForeColor = Dim });
             menu.Show(bModel, new Point(0, 0), ToolStripDropDownDirection.AboveRight);
         };
+        // Tự lấy danh sách model mới mỗi lần mở app (chạy ngầm, lỗi thì dùng danh sách có sẵn)
+        ClaudeEngine.RefreshModels().ContinueWith(t => { try { if (t.Result && IsHandleCreated) BeginInvoke(syncModel); } catch { } });
         effort.Level = L.Get("chat.effort", "");
         effort.Changed += lv => L.Set("chat.effort", lv ?? "");
         syncModel();

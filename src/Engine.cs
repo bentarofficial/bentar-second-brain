@@ -103,23 +103,120 @@ static class ClaudeEngine
     }
     static string Quote(string a) { return a.Length > 0 && a.IndexOfAny(new[] { ' ', '(', ')', '&', '^', '|', '<', '>', '*', '"', ',' }) < 0 ? a : "\"" + a.Replace("\"", "\\\"") + "\""; }
 
-    // Model chọn được (bí danh của Claude Code luôn trỏ tới bản mới nhất) và mức effort mặc định của từng model.
-    // Mọi model hiện tại đều nhận đủ 5 mức effort: low, medium, high, xhigh, max.
-    public static readonly Tuple<string, string, string>[] Models = {
-        Tuple.Create("", "Mặc định", "Default"),
-        Tuple.Create("claude-fable-5-1", "Fable 5.1 — mạnh nhất", "Fable 5.1 — most capable"),
-        Tuple.Create("claude-opus-5-5", "Opus 5.5 — cân bằng", "Opus 5.5 — balanced"),
-        Tuple.Create("claude-sonnet-5-5", "Sonnet 5.5 — nhanh", "Sonnet 5.5 — fast"),
-        Tuple.Create("claude-haiku-5-5", "Haiku 5.5 — rất nhanh, rẻ", "Haiku 5.5 — fastest, cheapest") };
-    /// <summary>Model đã chọn; lựa chọn cũ dạng bí danh (opus, sonnet…) được đổi sang mã đầy đủ có số phiên bản.</summary>
+    // ---------- Model và mức effort ----------
+    public class ModelInfo
+    {
+        public string Id, Name, Family, Note;
+        public string[] Efforts;          // mức effort model nhận; rỗng = model không có effort
+        public string DefaultEffort;      // mức Claude dùng khi không chọn
+    }
+    public static readonly string[] AllEfforts = { "low", "medium", "high", "xhigh", "max" };
+    static readonly string[] NoXhigh = { "low", "medium", "high", "max" };
+    static ModelInfo M(string id, string name, string fam, string[] eff, string def, string note = null) { return new ModelInfo { Id = id, Name = name, Family = fam, Efforts = eff, DefaultEffort = def, Note = note }; }
+    // Danh sách dựng sẵn (mới nhất trước trong mỗi dòng), được bổ sung bằng danh sách lấy trực tiếp từ API khi có thể.
+    // Effort theo tài liệu Anthropic: dòng 5.x và Opus 4.7/4.8 đủ 5 mức; Opus/Sonnet 4.6 không có xhigh; Haiku 4.5 không có effort.
+    static readonly ModelInfo[] Builtin = {
+        M("claude-fable-5-1", "Fable 5.1", "Fable", AllEfforts, "high"),
+        M("claude-fable-5", "Fable 5", "Fable", AllEfforts, "high", "credit"),
+        M("claude-opus-5-5", "Opus 5.5", "Opus", AllEfforts, "medium"),
+        M("claude-opus-5", "Opus 5", "Opus", AllEfforts, "high"),
+        M("claude-opus-4-8", "Opus 4.8", "Opus", AllEfforts, "high"),
+        M("claude-opus-4-7", "Opus 4.7", "Opus", AllEfforts, "high"),
+        M("claude-opus-4-6", "Opus 4.6", "Opus", NoXhigh, "high"),
+        M("claude-sonnet-5-5", "Sonnet 5.5", "Sonnet", AllEfforts, "high"),
+        M("claude-sonnet-5", "Sonnet 5", "Sonnet", AllEfforts, "high"),
+        M("claude-sonnet-4-6", "Sonnet 4.6", "Sonnet", NoXhigh, "high"),
+        M("claude-haiku-5-5", "Haiku 5.5", "Haiku", AllEfforts, "medium"),
+        M("claude-haiku-4-5", "Haiku 4.5", "Haiku", new string[0], null) };
+    static readonly string ModelCache = Path.Combine(Cleaner.DataDir, "models.json");
+    static List<ModelInfo> fetched;
+
+    /// <summary>Mọi model chọn được: danh sách dựng sẵn + model mới mà API báo về (chưa có trong danh sách dựng sẵn).</summary>
+    public static List<ModelInfo> Models
+    {
+        get
+        {
+            if (fetched == null) try { fetched = File.Exists(ModelCache) ? ParseModels(File.ReadAllText(ModelCache)) : new List<ModelInfo>(); } catch { fetched = new List<ModelInfo>(); }
+            var all = Builtin.ToList();
+            foreach (var f in fetched) if (!all.Any(x => x.Id == f.Id)) all.Add(f);
+            var order = new[] { "Fable", "Opus", "Sonnet", "Haiku" };
+            return all.OrderBy(x => Array.IndexOf(order, x.Family) < 0 ? 9 : Array.IndexOf(order, x.Family)).ThenByDescending(x => VersionOf(x.Id)).ToList();
+        }
+    }
+    static double VersionOf(string id)
+    {
+        var parts = id.Split('-').Skip(2).TakeWhile(p => p.Length <= 2 && p.All(char.IsDigit)).ToList();
+        double v = 0; try { if (parts.Count > 0) v = int.Parse(parts[0]); if (parts.Count > 1) v += int.Parse(parts[1]) / 10.0; } catch { }
+        return v;
+    }
+    static List<ModelInfo> ParseModels(string json)
+    {
+        var list = new List<ModelInfo>();
+        var root = Json.DeserializeObject(json) as Dictionary<string, object>;
+        foreach (var o in (root != null && root.ContainsKey("data") ? root["data"] as object[] : null) ?? new object[0])
+        {
+            var d = o as Dictionary<string, object>; if (d == null) continue;
+            var id = d.ContainsKey("id") ? d["id"] as string : null; if (string.IsNullOrEmpty(id) || !id.StartsWith("claude-")) continue;
+            var name = (d.ContainsKey("display_name") ? d["display_name"] as string : null) ?? id;
+            name = name.Replace("Claude ", "");
+            var fam = new[] { "Fable", "Mythos", "Opus", "Sonnet", "Haiku" }.FirstOrDefault(f => id.Contains(f.ToLowerInvariant())) ?? "Khác";
+            double v = VersionOf(id);
+            // Model chưa biết: đoán mức effort theo đời model (≥4.7 đủ 5 mức; 4.6 không có xhigh; cũ hơn không có effort)
+            var eff = v >= 4.7 ? AllEfforts : v >= 4.6 ? NoXhigh : new string[0];
+            list.Add(M(id, name, fam, eff, eff.Length > 0 ? "high" : null));
+        }
+        return list;
+    }
+
+    /// <summary>Hỏi API Anthropic danh sách model mà tài khoản này dùng được (bằng phiên đăng nhập Claude); im lặng nếu không được.</summary>
+    public static Task<bool> RefreshModels()
+    {
+        return Task.Run(() =>
+        {
+            try
+            {
+                var tok = Token() ?? CliAccessToken();
+                if (tok == null) return false;
+                var req = (System.Net.HttpWebRequest)System.Net.WebRequest.Create("https://api.anthropic.com/v1/models?limit=100");
+                req.Headers["Authorization"] = "Bearer " + tok;
+                req.Headers["anthropic-version"] = "2023-06-01";
+                req.Headers["anthropic-beta"] = "oauth-2025-04-20";
+                req.Timeout = 15000;
+                string body;
+                using (var res = req.GetResponse()) using (var r = new StreamReader(res.GetResponseStream(), Encoding.UTF8)) body = r.ReadToEnd();
+                var list = ParseModels(body);
+                if (list.Count == 0) return false;
+                fetched = list;
+                Directory.CreateDirectory(Cleaner.DataDir);
+                File.WriteAllText(ModelCache, body, new UTF8Encoding(false));
+                return true;
+            }
+            catch { return false; }
+        });
+    }
+    // Phiên đăng nhập của Claude Code (claude auth login) lưu ở ~/.claude/.credentials.json
+    static string CliAccessToken()
+    {
+        try
+        {
+            var f = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude", ".credentials.json");
+            if (!File.Exists(f)) return null;
+            var d = Json.DeserializeObject(File.ReadAllText(f)) as Dictionary<string, object>;
+            var o = d != null && d.ContainsKey("claudeAiOauth") ? d["claudeAiOauth"] as Dictionary<string, object> : null;
+            return o != null && o.ContainsKey("accessToken") ? o["accessToken"] as string : null;
+        }
+        catch { return null; }
+    }
+
+    public static ModelInfo FindModel(string id) { return Models.FirstOrDefault(x => x.Id == id); }
+    /// <summary>Model đã chọn; lựa chọn cũ dạng bí danh (opus, sonnet…) được đổi sang bản mới nhất của dòng đó.</summary>
     public static string ModelPref()
     {
         var m = L.Get("chat.model", "");
-        var full = Models.FirstOrDefault(x => x.Item1 != "" && x.Item1.Contains("-" + m + "-"));
-        return m.Length > 0 && !m.StartsWith("claude-") && full != null ? full.Item1 : m;
+        if (m.Length == 0 || m.StartsWith("claude-")) return m;
+        var full = Models.FirstOrDefault(x => x.Id.Contains("-" + m + "-"));
+        return full != null ? full.Id : "";
     }
-    public static readonly string[] Efforts = { "low", "medium", "high", "xhigh", "max" };
-    public static string DefaultEffort(string model) { return model.Contains("opus") || model.Contains("haiku") ? "medium" : model == "" ? null : "high"; }
 
     // Không bao giờ cho agent tự làm những việc khó đảo ngược hoặc lộ ra ngoài
     static readonly string[] Forbidden = {
@@ -185,8 +282,10 @@ static class ClaudeEngine
         args.Add("--disallowedTools"); args.AddRange(Forbidden);
         // Model và mức effort người dùng chọn dưới ô chat (trống = để Claude Code dùng mặc định của model)
         var model = ModelPref(); var effort = L.Get("chat.effort", "");
-        if (model != "" && Models.Any(m => m.Item1 == model)) { args.Add("--model"); args.Add(model); }
-        if (Efforts.Contains(effort)) { args.Add("--effort"); args.Add(effort); }
+        var mi = model != "" ? FindModel(model) : null;
+        if (mi != null) { args.Add("--model"); args.Add(model); }
+        // Chỉ gửi mức effort mà model đó nhận (Mặc định: mọi model hiện tại đều nhận đủ 5 mức)
+        if (AllEfforts.Contains(effort) && (mi == null || mi.Efforts.Contains(effort))) { args.Add("--effort"); args.Add(effort); }
         if (!string.IsNullOrEmpty(resume)) { args.Add("--resume"); args.Add(resume); if (fork) args.Add("--fork-session"); }
 
         var run = new Run();
