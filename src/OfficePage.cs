@@ -25,7 +25,8 @@ partial class MainForm
         foreach (var b in new[] { offConnect, offTask, offLog }) b.Margin = new Padding(0, 0, 0, 8);
         btns.Controls.AddRange(new Control[] { offConnect, offTask, offLog });
         side.Controls.Add(offRecent); side.Controls.Add(btns); side.Controls.Add(offState); side.Controls.Add(offRole); side.Controls.Add(offName);
-        p.Controls.Add(office); p.Controls.Add(side);
+        btns.Resize += (s, e) => { foreach (Control b in btns.Controls) b.Width = btns.ClientSize.Width; };
+        p.Controls.Add(office); p.Controls.Add(Sizer.Grip(side, "officeside", 300, 220, 520)); p.Controls.Add(side);
 
         office.SelectionChanged += s => ShowStaff(s);
         office.TeamChanged += () => { if (!IsDisposed) BeginInvoke(new Action(() => ShowStaff(office.Selected))); };

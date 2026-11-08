@@ -52,9 +52,10 @@ partial class MainForm
                 using (var path = Round.Path(new RectangleF(0.5f, 0.5f, b.Width - 1.5f, b.Height - 1.5f), 12)) using (var br = new SolidBrush(Panel2)) g.FillPath(br, path);
             using (var br = new LinearGradientBrush(new Rectangle(8, 11, 32, 32), Theme.Accent, Theme.Violet, 45f)) g.FillEllipse(br, 8, 11, 32, 32);
             TextRenderer.DrawText(g, name.Length > 0 ? name.Substring(0, 1).ToUpper() : "?", new Font("Segoe UI", 11f, FontStyle.Bold), new Rectangle(8, 11, 32, 32), Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
-            TextRenderer.DrawText(g, name, new Font("Segoe UI", 10f, FontStyle.Bold), new Rectangle(48, 10, 120, 18), Ink, TextFormatFlags.EndEllipsis);
-            TextRenderer.DrawText(g, L.T("Settings · v", "Cài đặt · v") + Updater.Current.ToString(3), new Font("Segoe UI", 8.5f), new Rectangle(48, 29, 130, 16), Dim, TextFormatFlags.EndEllipsis);
-            TextRenderer.DrawText(g, "⋯", new Font("Segoe UI", 12f), new Rectangle(168, 14, 24, 24), Dim, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+            if (b.Width < 110) return;   // thanh bên thu gọn: chỉ còn ảnh đại diện
+            TextRenderer.DrawText(g, name, new Font("Segoe UI", 10f, FontStyle.Bold), new Rectangle(48, 10, b.Width - 76, 18), Ink, TextFormatFlags.EndEllipsis);
+            TextRenderer.DrawText(g, L.T("Settings · v", "Cài đặt · v") + Updater.Current.ToString(3), new Font("Segoe UI", 8.5f), new Rectangle(48, 29, b.Width - 66, 16), Dim, TextFormatFlags.EndEllipsis);
+            TextRenderer.DrawText(g, "⋯", new Font("Segoe UI", 12f), new Rectangle(b.Width - 28, 14, 24, 24), Dim, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
         };
         b.MouseEnter += (s, e) => { userHover = true; b.Invalidate(); };
         b.MouseLeave += (s, e) => { userHover = false; b.Invalidate(); };

@@ -98,7 +98,7 @@ The **Chat** page talks to your Second Brain using your own Claude plan (Claude 
 - Everything is reversible: deleted projects and chats go to the app's **Trash** for 30 days (restore or delete forever). Removing a project never touches its folder; **Delete project and folder** exists only for folders Second Brain created, and sends them to the Windows Recycle Bin.
 - **Office** page: your agents as staff at desks in a live office; their animation follows real activity, and you can connect, disconnect or assign work from there.
 
-Setup once: run `claude setup-token` in a terminal, then click **Claude sign-in…** on the Chat page and paste the token. It is encrypted with your Windows account and never goes into memory or backups.
+Setup once: click **Claude sign-in…** on the Chat page, then **Sign in with browser** and sign in with Google or your Claude account. (Advanced: paste a token from `claude setup-token` instead.) It is encrypted with your Windows account and never goes into memory or backups.
 
 ### Only learns what is proven
 

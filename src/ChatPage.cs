@@ -129,19 +129,41 @@ partial class MainForm
         var logWrap = new Panel { Dock = DockStyle.Fill, BackColor = Theme.List, Padding = new Padding(16, 12, 16, 12) };
         logWrap.Controls.Add(chatLog);
 
-        var bottom = new Panel { Dock = DockStyle.Bottom, Height = 132, BackColor = Bg, Padding = new Padding(0, 10, 0, 0) };
-        chatInput.Multiline = true; chatInput.Dock = DockStyle.Fill; chatInput.ScrollBars = ScrollBars.Vertical; chatInput.Font = new Font("Segoe UI", 10.5f); Dark(chatInput);
-        var btns = new FlowLayoutPanel { Dock = DockStyle.Right, Width = 300, FlowDirection = FlowDirection.TopDown, WrapContents = true, BackColor = Bg, Padding = new Padding(10, 0, 0, 0) };
-        bAsk = Btn(L.T("Ask  (Ctrl+Enter)", "Hỏi  (Ctrl+Enter)"), 140, true);
-        bTask = Btn(L.T("Do task…", "Giao việc…"), 140);
-        bApprove = Btn(L.T("✓ Approve plan", "✓ Duyệt kế hoạch"), 140, true); bApprove.Visible = false;
-        bReject = Btn(L.T("Cancel plan", "Huỷ kế hoạch"), 140); bReject.Visible = false;
-        bStop = Btn(L.T("■ Stop", "■ Dừng"), 140); bStop.Visible = false;
-        foreach (var b in new[] { bAsk, bTask, bApprove, bReject, bStop }) b.Margin = new Padding(0, 0, 8, 8);
-        btns.Controls.AddRange(new Control[] { bAsk, bTask, bApprove, bReject, bStop });
-        bottom.Controls.Add(chatInput); bottom.Controls.Add(btns);
-        main.Controls.Add(logWrap); main.Controls.Add(bottom); main.Controls.Add(top);
-        p.Controls.Add(main); p.Controls.Add(chatTreeHost);
+        // Ô soạn tin kiểu Claude Code: một thẻ bo góc, chữ ở trên, thanh nhỏ bên dưới (chế độ · gợi ý · nút gửi tròn)
+        var bottom = new Panel { Dock = DockStyle.Bottom, Height = 112, BackColor = Bg, Padding = new Padding(0, 10, 0, 0) };
+        var card = new Panel { Dock = DockStyle.Fill, BackColor = Bg, Padding = new Padding(16, 12, 10, 6) };
+        Round.Card(card, Panel2, 14);
+        chatInput.Multiline = true; chatInput.Dock = DockStyle.Fill; chatInput.ScrollBars = ScrollBars.None; chatInput.Font = new Font("Segoe UI", 10.5f); Dark(chatInput);
+        chatInput.BorderStyle = BorderStyle.None; chatInput.BackColor = Panel2;
+        var bar = new Panel { Dock = DockStyle.Bottom, Height = 36, BackColor = Panel2 };
+        bTask = Btn(L.T("✧ Ask", "✧ Hỏi"), 118); bTask.Dock = DockStyle.Left; bTask.BackColor = Panel2;
+        var hint = new Label { Dock = DockStyle.Fill, ForeColor = Dim, Font = new Font("Segoe UI", 8.5f), TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(10, 0, 0, 0),
+            Text = L.T("Enter to send · Shift+Enter new line", "Enter để gửi · Shift+Enter xuống dòng") };
+        bAsk = Btn("↑", 36, true); bAsk.Dock = DockStyle.Right; bAsk.Font = new Font("Segoe UI", 12f, FontStyle.Bold);
+        bStop = Btn("■", 36); bStop.Dock = DockStyle.Right; bStop.Visible = false;
+        Round.Button(bAsk, 17); Round.Button(bStop, 17);
+        bar.Controls.AddRange(new Control[] { hint, bTask, bStop, bAsk });
+        card.Controls.Add(chatInput); card.Controls.Add(bar);
+        // Thanh duyệt kế hoạch: chỉ hiện khi có kế hoạch đang chờ
+        var approveBar = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 44, BackColor = Bg, Visible = false, Padding = new Padding(0, 6, 0, 0) };
+        bApprove = Btn(L.T("✓ Approve plan", "✓ Duyệt kế hoạch"), 160, true);
+        bReject = Btn(L.T("Cancel plan", "Huỷ kế hoạch"), 130);
+        bApprove.Margin = bReject.Margin = new Padding(0, 0, 8, 0);
+        approveBar.Controls.AddRange(new Control[] { bApprove, bReject });
+        bottom.Controls.Add(card);
+        // Ô nhập tự cao lên theo số dòng (tối đa ~10 dòng), giống Claude Code
+        Action fit = () =>
+        {
+            int lines = Math.Max(1, chatInput.GetLineFromCharIndex(Math.Max(0, chatInput.TextLength)) + 1);
+            int lh = chatInput.Font.Height;
+            bottom.Height = Math.Min(10, Math.Max(2, lines)) * lh + 10 + 18 + 36 + 6;
+            chatInput.ScrollBars = lines > 10 ? ScrollBars.Vertical : ScrollBars.None;
+        };
+        chatInput.TextChanged += (s, e) => fit();
+        chatInput.Resize += (s, e) => fit();
+        main.Controls.Add(logWrap); main.Controls.Add(approveBar); main.Controls.Add(bottom); main.Controls.Add(top);
+        var treeGrip = Sizer.Grip(chatTreeHost, "chattree", 270, 180, 480);
+        p.Controls.Add(main); p.Controls.Add(treeGrip); p.Controls.Add(chatTreeHost);
 
         // ----- Sự kiện -----
         chatTree.RowClick += r =>
@@ -154,14 +176,14 @@ partial class MainForm
         };
         chatTree.PlusClick += r => { curProjectId = r.Id; OpenChat(Workspace.NewChat(r.Id)); chatInput.Focus(); };
         chatTree.DotsClick += r => { var m = r.Kind == "project" ? ProjectMenu(Workspace.Project(r.Id)) : ChatMenu(Workspace.Chat(r.Id)); if (m != null) m.Show(chatTree, new Point(r.Bounds.Right - 20, r.Bounds.Bottom)); };
-        bAsk.Click += (s, e) => Ask();
-        bTask.Click += (s, e) => PlanTask();
+        bAsk.Click += (s, e) => Send();
+        bTask.Click += (s, e) => { taskMode = !taskMode; bTask.Text = taskMode ? L.T("⚒ Do task", "⚒ Giao việc") : L.T("✧ Ask", "✧ Hỏi"); bTask.ForeColor = taskMode ? Theme.Accent : Ink; chatInput.Focus(); };
         bApprove.Click += (s, e) => DoTask();
         bReject.Click += (s, e) => { if (curChat == null) return; approvals.Remove(curChat.Id); UpdateButtons(); AddMsg(curChat, "note", L.T("Plan cancelled. Nothing was changed.", "Đã huỷ kế hoạch. Chưa có gì bị thay đổi.")); };
         bStop.Click += (s, e) => { ClaudeEngine.Run r; if (curChat != null && runs.TryGetValue(curChat.Id, out r)) r.Stop(); };
         bTasks.Click += (s, e) => TasksDialog();
         bToken.Click += (s, e) => TokenDialog();
-        chatInput.KeyDown += (s, e) => { if (e.Control && e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; Ask(); } };
+        chatInput.KeyDown += (s, e) => { if (e.KeyCode == Keys.Enter && !e.Shift) { e.SuppressKeyPress = true; Send(); } };
         // Bấm chuột phải vào một tin nhắn: phân nhánh từ đó
         var logMenu = new ContextMenuStrip();
         logMenu.Items.Add(L.T("Branch from this message", "Phân nhánh từ tin nhắn này"), null, (s, e) =>
@@ -269,12 +291,15 @@ partial class MainForm
     {
         bool busy = CurBusy, appr = CurAwaiting;
         bAsk.Enabled = bTask.Enabled = !busy && !appr;
-        bApprove.Visible = bReject.Visible = appr && !busy;
-        bStop.Visible = busy;
+        if (bApprove.Parent != null) bApprove.Parent.Visible = appr && !busy;   // thanh duyệt kế hoạch
+        bStop.Visible = busy; bAsk.Visible = !busy;
         int open = Workspace.Data.Tasks.Count(t => t.ProjectId == curProjectId && t.Open), running = runs.Count;
         bTasks.Text = L.T("Tasks", "Việc") + (open > 0 ? " (" + open + ")" : "") + (running > 0 ? "  ●" + running : "");
     }
     void SetChatBusy(bool busy, bool approval = false) { UpdateButtons(); }
+
+    bool taskMode;
+    void Send() { if (!bAsk.Enabled) return; if (taskMode) PlanTask(); else Ask(); }
 
     void Ask()
     {
@@ -615,19 +640,46 @@ partial class MainForm
 
     void TokenDialog()
     {
-        using (var f = SmallDialog(L.T("Claude sign-in", "Đăng nhập Claude"), 560, 230))
+        using (var f = SmallDialog(L.T("Claude sign-in", "Đăng nhập Claude"), 560, 300))
         {
-            f.Controls.Add(new Label { Text = L.T("Second Brain uses your Claude plan through Claude Code.\n1. Open a terminal and run:  claude setup-token\n2. Sign in in the browser, then paste the token below.\nIt is stored encrypted with your Windows account and never leaves this PC.",
-                "Second Brain dùng gói Claude của bạn qua Claude Code.\n1. Mở cửa sổ dòng lệnh và chạy:  claude setup-token\n2. Đăng nhập trên trình duyệt rồi dán mã vào ô dưới.\nMã được mã hoá bằng tài khoản Windows của bạn và không rời khỏi máy."),
-                Location = new Point(16, 14), Size = new Size(528, 92), ForeColor = Ink });
-            var tb = new TextBox { Location = new Point(16, 114), Width = 528, UseSystemPasswordChar = true }; Dark(tb);
-            var ok = Btn(L.T("Save", "Lưu"), 100, true); ok.Location = new Point(338, 176);
-            var clear = Btn(L.T("Remove", "Xoá mã"), 100); clear.Location = new Point(16, 176); clear.Visible = ClaudeEngine.HasToken;
-            var cancel = Btn(L.T("Cancel", "Huỷ"), 100); cancel.Location = new Point(444, 176); cancel.DialogResult = DialogResult.Cancel;
+            f.Controls.Add(new Label { Text = L.T("Second Brain uses your Claude plan through Claude Code.\nClick the button: your browser opens, sign in with Google or your Claude account, done.",
+                "Second Brain dùng gói Claude của bạn qua Claude Code.\nBấm nút dưới: trình duyệt sẽ mở, đăng nhập bằng Google hoặc tài khoản Claude là xong."),
+                Location = new Point(16, 14), Size = new Size(528, 46), ForeColor = Ink });
+            var login = Btn(L.T("Sign in with browser", "Đăng nhập bằng trình duyệt"), 260, true); login.Location = new Point(16, 66);
+            var status = new Label { Location = new Point(286, 72), Size = new Size(258, 40), ForeColor = Ink };
+            f.Controls.Add(new Label { Text = L.T("Advanced: paste a token from `claude setup-token` (stored encrypted, never leaves this PC).",
+                "Nâng cao: dán mã từ lệnh `claude setup-token` (được mã hoá, không rời khỏi máy)."),
+                Location = new Point(16, 128), Size = new Size(528, 36), ForeColor = Ink });
+            var tb = new TextBox { Location = new Point(16, 168), Width = 528, UseSystemPasswordChar = true }; Dark(tb);
+            var ok = Btn(L.T("Save token", "Lưu mã"), 100); ok.Location = new Point(338, 236);
+            var clear = Btn(L.T("Remove", "Xoá mã"), 100); clear.Location = new Point(16, 236); clear.Visible = ClaudeEngine.HasToken;
+            var cancel = Btn(L.T("Close", "Đóng"), 100); cancel.Location = new Point(444, 236); cancel.DialogResult = DialogResult.Cancel;
+            login.Click += (s, e) =>
+            {
+                System.Diagnostics.Process p;
+                try { p = ClaudeEngine.StartBrowserLogin(); } catch (Exception ex) { MessageBox.Show(f, ex.Message, Text); return; }
+                login.Enabled = false;
+                status.Text = L.T("Finish signing in in the browser…", "Hoàn tất đăng nhập trên trình duyệt…");
+                System.Threading.Tasks.Task.Run(() =>
+                {
+                    try { if (p != null) p.WaitForExit(); } catch { }
+                    var okNow = ClaudeEngine.CliLoggedIn();
+                    try
+                    {
+                        f.BeginInvoke((Action)(() =>
+                        {
+                            login.Enabled = true;
+                            if (okNow) f.DialogResult = DialogResult.OK;
+                            else status.Text = L.T("Not signed in yet. Try again.", "Chưa đăng nhập được. Thử lại nhé.");
+                        }));
+                    }
+                    catch { }
+                });
+            };
             ok.Click += (s, e) => { try { ClaudeEngine.SetToken(tb.Text); f.DialogResult = DialogResult.OK; } catch (Exception ex) { MessageBox.Show(f, ex.Message, Text); } };
             clear.Click += (s, e) => { ClaudeEngine.ClearToken(); f.DialogResult = DialogResult.OK; };
-            f.Controls.AddRange(new Control[] { tb, ok, clear, cancel });
-            f.AcceptButton = ok; f.CancelButton = cancel;
+            f.Controls.AddRange(new Control[] { login, status, tb, ok, clear, cancel });
+            f.CancelButton = cancel;
             if (f.ShowDialog(this) == DialogResult.OK) { shownReadiness = false; RefreshReadiness(); }
         }
     }

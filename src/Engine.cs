@@ -58,14 +58,31 @@ static class ClaudeEngine
     {
         if (!Installed) return L.T("Claude Code is not installed (npm i -g @anthropic-ai/claude-code).", "Chưa cài Claude Code (npm i -g @anthropic-ai/claude-code).");
         if (HasToken) return null;
+        if (CliLoggedIn()) return null;
+        return L.T("Claude is not signed in. Click “Claude sign-in…” and sign in with Google or your Claude account.", "Claude chưa đăng nhập. Bấm “Đăng nhập Claude…” rồi đăng nhập bằng Google hoặc tài khoản Claude.");
+    }
+
+    /// <summary>Mở cửa sổ "claude auth login": trình duyệt bật lên, người dùng đăng nhập bằng Google hoặc tài khoản Claude.</summary>
+    public static Process StartBrowserLogin()
+    {
+        var exe = Cli;
+        if (exe == null) throw new InvalidOperationException(Readiness());
+        var psi = new ProcessStartInfo("cmd.exe", "/d /s /c \"" + Quote(exe) + " auth login\"")
+        { UseShellExecute = true, WorkingDirectory = Cleaner.DataDir };
+        Directory.CreateDirectory(Cleaner.DataDir);
+        return Process.Start(psi);
+    }
+
+    /// <summary>Claude Code (CLI) đã đăng nhập bằng tài khoản chưa.</summary>
+    public static bool CliLoggedIn()
+    {
         try
         {
             var p = Start(new[] { "auth", "status" }, Cleaner.DataDir, false);
             var o = p.StandardOutput.ReadToEnd(); p.WaitForExit(15000);
-            if (o.Contains("\"loggedIn\": true") || o.Contains("\"loggedIn\":true")) return null;
+            return o.Contains("\"loggedIn\": true") || o.Contains("\"loggedIn\":true");
         }
-        catch { }
-        return L.T("Claude is not signed in. Run `claude setup-token` in a terminal and paste the token here.", "Claude chưa đăng nhập. Chạy `claude setup-token` trong cửa sổ dòng lệnh rồi dán mã vào đây.");
+        catch { return false; }
     }
 
     static Process Start(IEnumerable<string> args, string cwd, bool stdin)

@@ -99,6 +99,77 @@ static class Theme
     }
 }
 
+// Đường phân cách kéo được (giống Claude Code / VS Code): rê chuột để thấy, kéo để đổi độ rộng,
+// bấm nút tròn ‹ › hoặc nhấp đúp để thu gọn / mở lại. Độ rộng được nhớ trong ui.ini.
+static class Sizer
+{
+    /// <param name="side">bảng bên (Dock Left/Right)</param>
+    /// <param name="collapsed">độ rộng khi thu gọn (0 = ẩn hẳn, ví dụ 64 = chỉ còn biểu tượng)</param>
+    public static System.Windows.Forms.Control Grip(System.Windows.Forms.Control side, string key, int def, int min, int max, int collapsed = 0)
+    {
+        bool left = side.Dock == System.Windows.Forms.DockStyle.Left;
+        var grip = new GripPanel { Dock = side.Dock, Width = 8, Cursor = System.Windows.Forms.Cursors.SizeWE };
+        int saved; if (!int.TryParse(L.Get("w." + key, def.ToString()), out saved)) saved = def;
+        int open = Math.Max(min, Math.Min(max, saved));
+        bool isCollapsed = L.On("c." + key, false);
+        Action apply = () =>
+        {
+            int w = isCollapsed ? collapsed : open;
+            side.Visible = w > 0; if (w > 0) side.Width = w;
+            grip.Left_ = left; grip.Collapsed = isCollapsed; grip.Invalidate();
+        };
+        Action toggle = () => { isCollapsed = !isCollapsed; L.Set("c." + key, isCollapsed); apply(); };
+        int downX = 0, startW = 0; bool down = false, moved = false;
+        grip.MouseDown += (s, e) => { if (e.Button != System.Windows.Forms.MouseButtons.Left) return; down = true; moved = false; downX = System.Windows.Forms.Cursor.Position.X; startW = isCollapsed ? collapsed : side.Width; };
+        grip.MouseMove += (s, e) =>
+        {
+            if (!down) return;
+            int dx = System.Windows.Forms.Cursor.Position.X - downX; if (!left) dx = -dx;
+            if (!moved && Math.Abs(dx) < 4) return;
+            moved = true;
+            int w = startW + dx;
+            if (w < min / 2) { if (!isCollapsed) { isCollapsed = true; apply(); } return; }   // kéo hẳn về mép: thu gọn
+            isCollapsed = false; open = Math.Max(min, Math.Min(max, w)); apply();
+        };
+        grip.MouseUp += (s, e) =>
+        {
+            if (!down) return; down = false;
+            if (!moved && grip.KnobHit(e.Location)) toggle();
+            else if (moved) { L.Set("w." + key, open.ToString()); L.Set("c." + key, isCollapsed); }
+        };
+        grip.DoubleClick += (s, e) => toggle();
+        grip.Toggle = toggle;
+        apply();
+        return grip;
+    }
+
+    class GripPanel : System.Windows.Forms.Panel
+    {
+        public bool Left_, Collapsed; public Action Toggle; bool hover;
+        public GripPanel() { DoubleBuffered = true; SetStyle(System.Windows.Forms.ControlStyles.ResizeRedraw, true); }
+        Rectangle Knob { get { return new Rectangle(0, Height / 2 - 18, Width, 36); } }
+        public bool KnobHit(Point p) { var k = Knob; k.Inflate(4, 4); return k.Contains(p); }
+        protected override void OnMouseEnter(EventArgs e) { hover = true; Invalidate(); base.OnMouseEnter(e); }
+        protected override void OnMouseLeave(EventArgs e) { hover = false; Invalidate(); base.OnMouseLeave(e); }
+        protected override void OnMouseMove(System.Windows.Forms.MouseEventArgs e) { Cursor = KnobHit(e.Location) ? System.Windows.Forms.Cursors.Hand : System.Windows.Forms.Cursors.SizeWE; base.OnMouseMove(e); }
+        protected override void OnPaint(System.Windows.Forms.PaintEventArgs e)
+        {
+            var g = e.Graphics; g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            g.Clear(Parent != null ? Parent.BackColor : Theme.Bg);
+            using (var pen = new Pen(hover ? Theme.Accent : Theme.Border, hover ? 2f : 1f)) g.DrawLine(pen, Width / 2f, 0, Width / 2f, Height);
+            // Nút tròn nhỏ ở giữa: mũi tên chỉ hướng thu gọn / mở ra
+            var k = Knob;
+            using (var path = Round.Path(new RectangleF(k.X + 0.5f, k.Y, k.Width - 1, k.Height), 4))
+            using (var br = new SolidBrush(hover ? Theme.Accent : Theme.Panel2)) g.FillPath(br, path);
+            bool pointLeft = Left_ != Collapsed;
+            float cx = Width / 2f, cy = Height / 2f;
+            using (var pen = new Pen(hover ? Theme.Bg : Theme.Dim, 1.6f))
+                if (pointLeft) g.DrawLines(pen, new[] { new PointF(cx + 1.5f, cy - 4), new PointF(cx - 1.5f, cy), new PointF(cx + 1.5f, cy + 4) });
+                else g.DrawLines(pen, new[] { new PointF(cx - 1.5f, cy - 4), new PointF(cx + 1.5f, cy), new PointF(cx - 1.5f, cy + 4) });
+        }
+    }
+}
+
 // Bo góc mềm: vẽ lại nút và thẻ bằng khử răng cưa (WinForms mặc định chỉ có góc vuông)
 static class Round
 {

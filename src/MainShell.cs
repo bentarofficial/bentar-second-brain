@@ -79,6 +79,24 @@ partial class MainForm
         // Góc người dùng: bấm để mở menu cài đặt nhanh (giống Claude Code)
         foot.Controls.Add(BuildUserButton());
         side.Controls.Add(nav); side.Controls.Add(foot); side.Controls.Add(logo);
+        // Thanh bên co giãn: hẹp hơn 130px thì chỉ còn biểu tượng (rê chuột để xem tên)
+        var tips = new ToolTip();
+        side.Resize += (s, e) =>
+        {
+            bool rail = side.Width < 130; int bw = side.Width - 20;
+            logo.Text = rail ? "B" : "Bentar\nSecond Brain"; logo.Padding = new Padding(rail ? 14 : 18, 14, 0, 0);
+            foreach (var kv in navButtons)
+            {
+                var full = navItems.First(x => x.Item1 == kv.Key).Item2;
+                kv.Value.Width = bw; kv.Value.Text = rail ? full.Split(' ')[0] : full;
+                kv.Value.TextAlign = rail ? ContentAlignment.MiddleCenter : ContentAlignment.MiddleLeft;
+                kv.Value.Padding = new Padding(rail ? 0 : 10, 0, 0, 0);
+                tips.SetToolTip(kv.Value, rail ? full.Substring(full.IndexOf(' ')).Trim() : null);
+            }
+            foreach (Control c in foot.Controls) c.Width = bw;
+            if (userBtn != null) userBtn.Invalidate();
+        };
+        var sideGrip = Sizer.Grip(side, "nav", 216, 150, 360, 64);
 
         // ----- Thanh trên: tên trang + các chỉ số -----
         var top = new Panel { Dock = DockStyle.Top, Height = 52, BackColor = Bg, Padding = new Padding(20, 0, 20, 0) };
@@ -101,7 +119,7 @@ partial class MainForm
         pages["settings"] = BuildSettingsPage();
         foreach (var p in pages.Values) { p.Dock = DockStyle.Fill; p.Visible = false; content.Controls.Add(p); }
 
-        Controls.Add(content); Controls.Add(top); Controls.Add(side);
+        Controls.Add(content); Controls.Add(top); Controls.Add(sideGrip); Controls.Add(side);
         ShowPage("brain");
 
         var timer = new Timer { Interval = 1000 };
