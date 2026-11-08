@@ -93,6 +93,9 @@ The **Chat** page talks to your Second Brain using your own Claude plan (Claude 
 - **Ask**: questions about your projects, documents and verified memories. Read-only.
 - **Do task**: pick a project and describe the work. Claude first writes a plan without changing anything; it starts only after you click **Approve plan**. It may edit files in that project and run its tests, but pushing, committing, releasing, deleting and web downloads are blocked. You review the changes (e.g. `git diff`) and commit yourself.
 - Live progress shows each step (files read, commands run); **Stop** ends it at once.
+- **Projects and chats** in the sidebar. **＋ New project** creates a folder (optionally with git) or uses an existing one, with its own instructions for Claude. Hover a project or chat and click **⋯** (or right-click): rename, project instructions, open folder, pin, **branch** (keeps Claude's context; right-click a message to branch from that point), move to another project, export Markdown, archive, delete.
+- Everything is reversible: deleted projects and chats go to the app's **Trash** for 30 days (restore or delete forever). Removing a project never touches its folder; **Delete project and folder** exists only for folders Second Brain created, and sends them to the Windows Recycle Bin.
+- **Office** page: your agents as staff at desks in a live office; their animation follows real activity, and you can connect, disconnect or assign work from there.
 
 Setup once: run `claude setup-token` in a terminal, then click **Claude sign-in…** on the Chat page and paste the token. It is encrypted with your Windows account and never goes into memory or backups.
 

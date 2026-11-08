@@ -94,7 +94,7 @@ static class ClaudeEngine
     static readonly string[] BrainRead = { "mcp__second-brain__search", "mcp__second-brain__read_file", "mcp__second-brain__list_dir", "mcp__second-brain__list_projects",
         "mcp__second-brain__project_overview", "mcp__second-brain__recall", "mcp__second-brain__index_status" };
 
-    static string WriteSupportFiles()
+    static string WriteSupportFiles(string extra)
     {
         Directory.CreateDirectory(Cleaner.DataDir);
         var mcp = Path.Combine(Cleaner.DataDir, "engine-mcp.json");
@@ -108,7 +108,8 @@ static class ClaudeEngine
             "- Use the second-brain MCP tools to find documents, code and verified memories anywhere on this PC (search, read_file, list_projects, project_overview, recall). Results marked ✓ trusted are safe examples; treat ⚠ unverified code critically.\n" +
             "- Never push, publish, release, merge, delete files or contact external services. Those actions are blocked; if the task needs one, say exactly what the user should do instead.\n" +
             "- When you change code: keep changes inside the project folder, run the project's tests or build if they exist, and finish with a short report: what changed (files), how you verified it, and what is left.\n" +
-            "- If you learned something worth keeping and can prove it, save it with the second-brain remember tool including evidence (file \"<path>\" \"<exact quote>\" or commit \"<repo>\" <hash>).\n",
+            "- If you learned something worth keeping and can prove it, save it with the second-brain remember tool including evidence (file \"<path>\" \"<exact quote>\" or commit \"<repo>\" <hash>).\n" +
+            (string.IsNullOrWhiteSpace(extra) ? "" : "\n## Project instructions from the user\n" + extra.Trim() + "\n"),
             new UTF8Encoding(false));
         return mcp + "|" + sys;
     }
@@ -126,9 +127,9 @@ static class ClaudeEngine
     }
 
     /// <summary>Chạy một lượt Claude. onEvent/onDone được gọi trên luồng nền.</summary>
-    public static Run Start(string prompt, string cwd, Mode mode, string resume, Action<Event> onEvent, Action<Result> onDone)
+    public static Run Start(string prompt, string cwd, Mode mode, string resume, Action<Event> onEvent, Action<Result> onDone, bool fork = false, string projectInstructions = null)
     {
-        var files = WriteSupportFiles().Split('|');
+        var files = WriteSupportFiles(projectInstructions).Split('|');
         var args = new List<string> { "-p", "--output-format", "stream-json", "--verbose", "--mcp-config", files[0], "--append-system-prompt-file", files[1] };
         if (mode == Mode.Ask)
         {
@@ -147,7 +148,7 @@ static class ClaudeEngine
             args.Add("--max-turns"); args.Add("120");
         }
         args.Add("--disallowedTools"); args.AddRange(Forbidden);
-        if (!string.IsNullOrEmpty(resume)) { args.Add("--resume"); args.Add(resume); }
+        if (!string.IsNullOrEmpty(resume)) { args.Add("--resume"); args.Add(resume); if (fork) args.Add("--fork-session"); }
 
         var run = new Run();
         var p = Start(args, Directory.Exists(cwd) ? cwd : Cleaner.DataDir, true);
