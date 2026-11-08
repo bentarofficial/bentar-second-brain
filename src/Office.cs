@@ -78,7 +78,7 @@ class OfficeView : Control
                     int dx = e.X - last.X, dy = e.Y - last.Y;
                     if (btn == MouseButtons.Left && ModifierKeys != Keys.Shift)
                     { yaw += dx * 0.01f; elev = Math.Max(0.2f, Math.Min(1.35f, elev + dy * 0.006f)); Cursor = Cursors.SizeAll; }
-                    else { panX += dx; panY += dy; Cursor = Cursors.SizeAll; }
+                    else { panX += dx; panY += dy; ClampPan(); Cursor = Cursors.SizeAll; }
                     last = e.Location; Invalidate(); return;
                 }
             }
@@ -96,7 +96,8 @@ class OfficeView : Control
             Selected = HitTest(e.Location); if (SelectionChanged != null) SelectionChanged(Selected);
         };
         MouseDoubleClick += (s, e) => { if (e.Button == MouseButtons.Left && HitTest(e.Location) == null && !controls.Any(c => c.Key.Contains(e.Location))) ResetView(); };
-        MouseWheel += (s, e) => ZoomAt(e.Location, (float)Math.Pow(1.15, e.Delta / 120.0));
+        // Lấy vị trí chuột trực tiếp theo khung vẽ (toạ độ của sự kiện cuộn không đáng tin khi khung không giữ focus)
+        MouseWheel += (s, e) => ZoomAt(PointToClient(Cursor.Position), (float)Math.Pow(1.15, e.Delta / 120.0));
         KeyDown += (s, e) =>
         {
             if (e.KeyCode == Keys.Left) yaw -= 0.15f; else if (e.KeyCode == Keys.Right) yaw += 0.15f;
@@ -110,11 +111,18 @@ class OfficeView : Control
 
     bool dragging;
     // Phóng to quanh con trỏ: điểm dưới chuột giữ nguyên chỗ
+    // Không cho tâm phòng trôi ra ngoài khung nhìn (phòng không bao giờ bị khuất hẳn)
+    void ClampPan()
+    {
+        panX = Math.Max(-Width * 0.45f, Math.Min(Width * 0.45f, panX));
+        panY = Math.Max(-Height * 0.5f, Math.Min(Height * 0.4f, panY));
+    }
     void ZoomAt(Point m, float f)
     {
         float nz = Math.Max(0.35f, Math.Min(5f, zoom * f)); f = nz / zoom;
         float cx = Width / 2f, cy = Height * 0.56f;
         panX = m.X - cx - (m.X - cx - panX) * f; panY = m.Y - cy - (m.Y - cy - panY) * f;
+        ClampPan();
         zoom = nz; Invalidate();
     }
 
@@ -549,20 +557,81 @@ class OfficeView : Control
             var sh2 = new PointF(hip.X + bw * 0.3f, hip.Y - bh * 0.8f + breathe); var hand2 = new PointF(sh2.X - tile * 0.2f, sh2.Y + tile * 0.16f - tap);
             using (var pen = new Pen(Shade(s.Shirt, -0.25f), tile * 0.08f) { StartCap = LineCap.Round, EndCap = LineCap.Round }) g.DrawLine(pen, sh2, hand2);
         }
-        // Đầu: gục xuống khi ngủ
-        float hr = tile * 0.17f;
-        var head = new PointF(hip.X + (asleep ? -tile * 0.08f : 0), hip.Y - bh - hr * 0.7f + breathe + (asleep ? tile * 0.1f : 0));
-        // Đầu tròn có khối: sáng ở góc trên-trái, tối dần về mép
+        // Đầu chibi: to, tròn, quay mặt ra phía người xem
+        float seed = cx * 7.3f + cy * 3.1f;
+        float hr = tile * 0.25f;
+        float bob = working ? (float)Math.Abs(Math.Sin(T * 6 + seed)) * tile * 0.025f            // gật gù theo nhịp gõ phím
+                  : asleep ? 0 : (float)Math.Sin(T * 1.6f + seed) * tile * 0.012f;
+        float hop = 0;                                                                            // thỉnh thoảng nhún nhảy vui vẻ
+        if (!working && !asleep) { float ph = (T + seed) % 9f; if (ph < 0.5f) hop = (float)Math.Sin(ph / 0.5f * Math.PI) * tile * 0.08f; }
+        float tilt = asleep ? 0.35f : (float)Math.Sin(T * 0.9f + seed) * 0.06f;
+        var head = new PointF(hip.X + (asleep ? -tile * 0.1f : 0), hip.Y - bh - hr * 0.75f + breathe - bob - hop + (asleep ? tile * 0.12f : 0));
+        var st0 = g.Save();
+        g.TranslateTransform(head.X, head.Y); g.RotateTransform(tilt * 57.3f); g.TranslateTransform(-head.X, -head.Y);
+        // Tóc phía sau (tóc dài cho nhân vật nữ)
+        if (s.Skirt) using (var b = new SolidBrush(Shade(s.Hair, -0.1f))) g.FillEllipse(b, head.X - hr * 1.15f, head.Y - hr * 0.6f, hr * 2.3f, hr * 2.0f);
         using (var hp = new GraphicsPath())
         {
-            hp.AddEllipse(head.X - hr, head.Y - hr, hr * 2, hr * 2);
-            using (var b = new PathGradientBrush(hp) { CenterPoint = new PointF(head.X - hr * 0.35f, head.Y - hr * 0.35f), CenterColor = Color.FromArgb(255, 226, 200), SurroundColors = new[] { Color.FromArgb(214, 166, 136) } })
+            hp.AddEllipse(head.X - hr, head.Y - hr * 0.95f, hr * 2, hr * 1.9f);
+            using (var b = new PathGradientBrush(hp) { CenterPoint = new PointF(head.X - hr * 0.3f, head.Y - hr * 0.3f), CenterColor = Color.FromArgb(255, 230, 208), SurroundColors = new[] { Color.FromArgb(226, 176, 146) } })
                 g.FillPath(b, hp);
         }
-        using (var b = new SolidBrush(s.Hair)) { g.FillPie(b, head.X - hr * 1.05f, head.Y - hr * 1.1f, hr * 2.1f, hr * 2.0f, 180, 180); g.FillEllipse(b, head.X - hr * 0.2f, head.Y - hr * 0.9f, hr * 1.25f, hr * 1.6f); }
-        if (s.Skirt) using (var b = new SolidBrush(s.Hair)) g.FillEllipse(b, head.X + hr * 0.4f, head.Y - hr * 0.1f, hr * 0.9f, hr * 1.4f);
+        // Tóc mái: mũ tóc phía trên + vài lọn rủ xuống trán
+        using (var b = new SolidBrush(s.Hair))
+        {
+            g.FillPie(b, head.X - hr * 1.07f, head.Y - hr * 1.12f, hr * 2.14f, hr * 1.9f, 180, 180);
+            g.FillEllipse(b, head.X - hr * 0.95f, head.Y - hr * 0.55f, hr * 0.7f, hr * 0.45f);
+            g.FillEllipse(b, head.X - hr * 0.35f, head.Y - hr * 0.6f, hr * 0.8f, hr * 0.4f);
+            g.FillEllipse(b, head.X + hr * 0.3f, head.Y - hr * 0.55f, hr * 0.65f, hr * 0.45f);
+            if (!s.Skirt) g.FillEllipse(b, head.X - hr * 0.1f, head.Y - hr * 1.32f, hr * 0.35f, hr * 0.4f);   // chỏm tóc dựng ngộ nghĩnh
+        }
+        using (var hl = new Pen(Color.FromArgb(70, 255, 255, 255), Math.Max(1, hr * 0.12f)) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+            g.DrawArc(hl, head.X - hr * 0.75f, head.Y - hr * 0.95f, hr * 1.1f, hr * 0.8f, 200, 60);
+        // Mắt: tròn to có đốm sáng, chớp mắt mỗi vài giây; nhắm khi ngủ, cười tít khi vừa nhún nhảy
+        float ey = head.Y + hr * 0.15f, ex = hr * 0.38f, er = hr * 0.17f;
+        bool blink = ((T + seed) % 4.2f) < 0.13f;
+        float look = working ? -hr * 0.08f : (float)Math.Sin(T * 0.7f + seed) * hr * 0.06f;
+        using (var eye = new SolidBrush(Color.FromArgb(40, 34, 48)))
+        using (var line = new Pen(Color.FromArgb(40, 34, 48), Math.Max(1.2f, hr * 0.09f)) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+            foreach (var side in new[] { -1, 1 })
+            {
+                float x0 = head.X + side * ex + look;
+                if (asleep || blink) g.DrawArc(line, x0 - er, ey - er * 0.6f, er * 2, er * 1.2f, 20, 140);
+                else if (hop > 0) g.DrawArc(line, x0 - er, ey - er * 0.2f, er * 2, er * 1.4f, 200, 140);
+                else
+                {
+                    g.FillEllipse(eye, x0 - er, ey - er * 1.15f, er * 2, er * 2.3f);
+                    using (var w = new SolidBrush(Color.White)) { g.FillEllipse(w, x0 - er * 0.55f, ey - er * 0.85f, er * 0.8f, er * 0.8f); g.FillEllipse(w, x0 + er * 0.25f, ey + er * 0.3f, er * 0.35f, er * 0.35f); }
+                }
+            }
+        // Má hồng
+        using (var b = new SolidBrush(Color.FromArgb(110, 255, 120, 130)))
+        { g.FillEllipse(b, head.X - hr * 0.78f, ey + er * 0.9f, hr * 0.32f, hr * 0.18f); g.FillEllipse(b, head.X + hr * 0.46f, ey + er * 0.9f, hr * 0.32f, hr * 0.18f); }
+        // Miệng: cười khi rảnh, chữ "o" tập trung khi làm việc, hé mở khi ngủ
+        using (var mouth = new Pen(Color.FromArgb(150, 70, 60), Math.Max(1.2f, hr * 0.08f)) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+        {
+            float my = ey + er * 1.7f;
+            if (working) using (var b = new SolidBrush(Color.FromArgb(150, 70, 60))) g.FillEllipse(b, head.X + look - hr * 0.06f, my - hr * 0.03f, hr * 0.12f, hr * 0.12f);
+            else if (asleep) g.DrawEllipse(mouth, head.X - hr * 0.05f, my, hr * 0.1f, hr * 0.08f);
+            else g.DrawArc(mouth, head.X - hr * 0.18f + look, my - hr * 0.12f, hr * 0.36f, hr * 0.24f, 20, 140);
+        }
+        g.Restore(st0);
         if (asleep) using (var f = new Font("Segoe UI", Math.Max(7, tile * 0.16f), FontStyle.Bold)) using (var b = new SolidBrush(Color.FromArgb((int)(150 + 100 * Math.Sin(T * 2)), 120, 130, 160)))
             g.DrawString("z z", f, b, head.X + hr, head.Y - hr * 2 - (T * 6 % 8));
+        // Biểu tượng cảm xúc nổi lên thỉnh thoảng: ý tưởng khi làm việc, cà phê/nhạc/tim khi rảnh
+        if (!asleep && s.Name != "boss")
+        {
+            float ph = (T * 0.5f + seed) % 7f;
+            if (ph < 1.6f)
+            {
+                string[] pool = working ? new[] { "💡", "⚡", "✨", "🔥" } : new[] { "☕", "♪", "❤", "😊" };
+                string emo = pool[(int)Math.Abs(seed + Math.Floor((T * 0.5f + seed) / 7f)) % pool.Length];
+                int a = (int)(255 * Math.Min(1, Math.Min(ph / 0.25f, (1.6f - ph) / 0.4f)));
+                using (var f = new Font("Segoe UI Emoji", Math.Max(8, tile * 0.2f)))
+                using (var b = new SolidBrush(Color.FromArgb(Math.Max(0, a), working ? Color.FromArgb(250, 190, 40) : Color.FromArgb(240, 90, 120))))
+                    g.DrawString(emo, f, b, head.X + hr * 0.6f, head.Y - hr * 2.4f - ph * tile * 0.12f);
+            }
+        }
         // Chấm trạng thái
         Color dot = working ? Color.FromArgb(52, 211, 153) : asleep ? Color.FromArgb(150, 150, 160) : Color.FromArgb(250, 204, 21);
         using (var b = new SolidBrush(dot)) g.FillEllipse(b, head.X + hr * 0.7f, head.Y - hr * 1.3f, tile * 0.1f, tile * 0.1f);
