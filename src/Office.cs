@@ -230,6 +230,7 @@ class OfficeView : Control
     float FaceShade(float nx, float ny) { float rx = nx * cosY - ny * sinY, ry = nx * sinY + ny * cosY; return -0.25f - 0.07f * (rx - ry); }
     public void ResetView() { yaw = 0; elev = (float)(Math.PI / 6); zoom = 1; panX = panY = 0; }
 
+    static int Clamp(int v) { return Math.Max(0, Math.Min(255, v)); }
     static Color Shade(Color c, float f)
     {
         Func<int, int> k = v => Math.Max(0, Math.Min(255, f >= 0 ? (int)(v + (255 - v) * f) : (int)(v * (1 + f))));
@@ -250,15 +251,31 @@ class OfficeView : Control
             Tuple.Create(-1f, 0f, new[] { P(x, y, z), P(x, y + dy, z), P(x, y + dy, z + dz), P(x, y, z + dz) }) };
         using (var pen = outline ? new Pen(Color.FromArgb(40, 0, 0, 0)) : null)
         {
-            foreach (var f in faces) if (Faces(f.Item1, f.Item2)) { Poly(g, Shade(c, FaceShade(f.Item1, f.Item2)), f.Item3); if (pen != null) g.DrawPolygon(pen, f.Item3); }
+            foreach (var f in faces) if (Faces(f.Item1, f.Item2))
+            {
+                // Mặt bên: sáng ở trên, tối dần xuống chân (ánh sáng trần + tắc nghẽn môi trường)
+                var fc = Shade(c, FaceShade(f.Item1, f.Item2)); var pts = f.Item3;
+                float y0 = Math.Min(pts[2].Y, pts[3].Y) - 1, y1 = Math.Max(pts[0].Y, pts[1].Y) + 1;
+                if (y1 - y0 > 2) using (var b = new LinearGradientBrush(new PointF(0, y0), new PointF(0, y1), Shade(fc, 0.08f), Shade(fc, -0.22f))) g.FillPolygon(b, pts);
+                else Poly(g, fc, pts);
+                if (pen != null) g.DrawPolygon(pen, pts);
+            }
             Poly(g, Shade(c, 0.12f), top); if (pen != null) g.DrawPolygon(pen, top);
+            // Viền sáng mép trên: cạnh bắt sáng làm khối nổi hẳn lên
+            if (dz > 0.05f && tile > 20) using (var hl = new Pen(Color.FromArgb(70, 255, 255, 255), 1f))
+                foreach (var f in faces) if (Faces(f.Item1, f.Item2)) g.DrawLine(hl, f.Item3[2], f.Item3[3]);
         }
     }
 
     void Shadow(Graphics g, float x, float y, float rx, float ry, int a = 50)
     {
+        // Bóng mềm: vài lớp elip đồng tâm, mờ dần ra mép (giả lập bóng đổ khuếch tán)
         var c = P(x, y); float w = (rx + ry) * tile / 2, h = (rx + ry) * tile / 2 * ySc;
-        using (var b = new SolidBrush(Color.FromArgb(a, 20, 20, 40))) g.FillEllipse(b, c.X - w / 2, c.Y - h / 2, w, h);
+        for (int i = 0; i < 4; i++)
+        {
+            float k = 1.25f - i * 0.17f;
+            using (var b = new SolidBrush(Color.FromArgb(a / 3, 20, 16, 30))) g.FillEllipse(b, c.X - w * k / 2, c.Y - h * k / 2, w * k, h * k);
+        }
     }
 
     // Bộ vẽ theo chiều sâu (thuật toán hoạ sĩ): vật ở xa vẽ trước
@@ -279,6 +296,10 @@ class OfficeView : Control
         ox = Width / 2f + panX - (CX - CY) * tile / 2; oy = Height * 0.56f + panY - (CX + CY) * tile / 2 * ySc;
         int hour = DateTime.Now.Hour; bool night = hour < 6 || hour >= 18;
         using (var bg = new LinearGradientBrush(ClientRectangle, night ? Color.FromArgb(22, 26, 48) : Color.FromArgb(226, 233, 245), night ? Color.FromArgb(10, 12, 24) : Color.FromArgb(244, 238, 228), 90f)) g.FillRectangle(bg, ClientRectangle);
+        // Bóng lớn dưới cả căn phòng: phòng như một mô hình nổi trên mặt bàn
+        { var c = P(CX, CY, -0.6f); float w = (float)Math.Sqrt(W * W + H * H) * tile * 0.62f, h = w * ySc * 1.05f;
+          using (var path = new GraphicsPath()) { path.AddEllipse(c.X - w / 2, c.Y - h / 2 + tile * 0.4f, w, h);
+            using (var b = new PathGradientBrush(path) { CenterColor = Color.FromArgb(night ? 150 : 90, 0, 0, 10), SurroundColors = new[] { Color.FromArgb(0, 0, 0, 10) } }) g.FillPath(b, path); } }
 
         DrawRoom(g, night);
         queue.Clear();
@@ -296,8 +317,40 @@ class OfficeView : Control
     void DrawRoom(Graphics g, bool night)
     {
         // Sàn gỗ + thảm khu kỹ thuật
-        for (int i = 0; i < W; i++) for (int j = 0; j < H; j++)
-            Poly(g, (i + j) % 2 == 0 ? Color.FromArgb(214, 186, 150) : Color.FromArgb(206, 177, 140), P(i, j), P(i + 1, j), P(i + 1, j + 1), P(i, j + 1));
+        // Bệ sàn dày (như sa bàn): các cạnh đang quay về người xem
+        Box(g, -0.15f, -0.15f, -0.55f, W + 0.3f, H + 0.3f, 0.55f, Color.FromArgb(92, 70, 56));
+        // Sàn gỗ: các tấm ván dài, so le, màu hơi khác nhau
+        var rndF = new Random(11);
+        for (int j = 0; j < H; j++)
+        {
+            float off = (j % 3) * 1.3f; float x0 = -off;
+            while (x0 < W)
+            {
+                float len = 2.2f + (float)rndF.NextDouble() * 1.8f, a = Math.Max(0, x0), b2 = Math.Min(W, x0 + len);
+                int v = rndF.Next(-12, 12);
+                Poly(g, Color.FromArgb(Clamp(210 + v), Clamp(180 + v), Clamp(142 + v)), P(a, j), P(b2, j), P(b2, j + 1), P(a, j + 1));
+                using (var pen = new Pen(Color.FromArgb(60, 120, 85, 55), 1f)) g.DrawLine(pen, P(b2, j), P(b2, j + 1));
+                x0 += len;
+            }
+            using (var pen = new Pen(Color.FromArgb(50, 120, 85, 55), 1f)) g.DrawLine(pen, P(0, j), P(W, j));
+        }
+        // Bóng tối ở chân các tường đang dựng (ambient occlusion)
+        foreach (var w in new[] { Tuple.Create(Faces(0, 1), 0f, 0f, W, 0f, 0f, 0.9f), Tuple.Create(Faces(1, 0), 0f, 0f, 0f, H, 0.9f, 0f),
+                                  Tuple.Create(Faces(0, -1), 0f, H, W, H, 0f, -0.9f), Tuple.Create(Faces(-1, 0), W, 0f, W, H, -0.9f, 0f) })
+        {
+            if (!w.Item1) continue;
+            var q = new[] { P(w.Item2, w.Item3), P(w.Item4, w.Item5), P(w.Item4 + w.Item6, w.Item5 + w.Item7), P(w.Item2 + w.Item6, w.Item3 + w.Item7) };
+            var m0 = P(w.Item2, w.Item3); var m1 = P(w.Item2 + w.Item6, w.Item3 + w.Item7);
+            if (Math.Abs(m0.X - m1.X) + Math.Abs(m0.Y - m1.Y) > 1)
+                using (var b = new LinearGradientBrush(m0, m1, Color.FromArgb(80, 40, 25, 15), Color.FromArgb(0, 40, 25, 15))) g.FillPolygon(b, q);
+        }
+        // Nắng qua cửa sổ đổ xuống sàn (ban ngày)
+        if (!night && Faces(0, 1))
+            foreach (var wx in new[] { 6.4f, 9.2f, 12.0f })
+            {
+                float sh = (float)Math.Sin(T * 0.05) * 0.2f;
+                using (var b = new SolidBrush(Color.FromArgb(46, 255, 240, 190))) g.FillPolygon(b, new[] { P(wx + 0.6f + sh, 0.2f), P(wx + 2.8f + sh, 0.2f), P(wx + 3.6f + sh, 3.0f), P(wx + 1.4f + sh, 3.0f) });
+            }
         Poly(g, Color.FromArgb(150, 92, 124, 140), P(5.4f, 5.2f), P(16.4f, 5.2f), P(16.4f, 11.8f), P(5.4f, 11.8f));
         Poly(g, Color.FromArgb(120, 170, 120, 90), P(0.6f, 5.8f), P(4.2f, 5.8f), P(4.2f, 8.6f), P(0.6f, 8.6f));
         // Vũng sáng đèn trần
@@ -311,8 +364,15 @@ class OfficeView : Control
         bool wallN = Faces(0, 1), wallW = Faces(1, 0), wallS = Faces(0, -1), wallE = Faces(-1, 0);
         Action<PointF, PointF, Color, Color> wall = (a, b, c, skirt) =>
         {
-            Poly(g, c, P(a.X, a.Y, 0), P(b.X, b.Y, 0), P(b.X, b.Y, 3), P(a.X, a.Y, 3));
+            // Mặt tường: sáng phía trên (đèn trần hắt lên), tối dần xuống chân
+            var face = new[] { P(a.X, a.Y, 0), P(b.X, b.Y, 0), P(b.X, b.Y, 3), P(a.X, a.Y, 3) };
+            float y0 = Math.Min(face[2].Y, face[3].Y), y1 = Math.Max(face[0].Y, face[1].Y);
+            using (var br = new LinearGradientBrush(new PointF(0, y0 - 1), new PointF(0, y1 + 1), Shade(c, 0.06f), Shade(c, -0.14f))) g.FillPolygon(br, face);
             Poly(g, skirt, P(a.X, a.Y, 0), P(b.X, b.Y, 0), P(b.X, b.Y, 0.18f), P(a.X, a.Y, 0.18f));
+            // Bề dày tường: dải mũ ở đỉnh, lùi ra ngoài phòng
+            float nx = a.Y == b.Y ? 0 : (a.X == 0 ? -0.25f : 0.25f), ny = a.Y == b.Y ? (a.Y == 0 ? -0.25f : 0.25f) : 0;
+            Poly(g, Shade(c, -0.35f), P(a.X, a.Y, 3), P(b.X, b.Y, 3), P(b.X + nx, b.Y + ny, 3), P(a.X + nx, a.Y + ny, 3));
+            using (var pen = new Pen(Color.FromArgb(90, 255, 255, 255), 1f)) g.DrawLine(pen, P(a.X, a.Y, 3), P(b.X, b.Y, 3));
         };
         if (wallS) wall(new PointF(0, H), new PointF(W, H), Color.FromArgb(230, 224, 214), Color.FromArgb(115, 92, 76));
         if (wallE) wall(new PointF(W, 0), new PointF(W, H), Color.FromArgb(218, 210, 198), Color.FromArgb(105, 85, 70));
@@ -492,7 +552,13 @@ class OfficeView : Control
         // Đầu: gục xuống khi ngủ
         float hr = tile * 0.17f;
         var head = new PointF(hip.X + (asleep ? -tile * 0.08f : 0), hip.Y - bh - hr * 0.7f + breathe + (asleep ? tile * 0.1f : 0));
-        using (var b = new SolidBrush(Color.FromArgb(242, 205, 175))) g.FillEllipse(b, head.X - hr, head.Y - hr, hr * 2, hr * 2);
+        // Đầu tròn có khối: sáng ở góc trên-trái, tối dần về mép
+        using (var hp = new GraphicsPath())
+        {
+            hp.AddEllipse(head.X - hr, head.Y - hr, hr * 2, hr * 2);
+            using (var b = new PathGradientBrush(hp) { CenterPoint = new PointF(head.X - hr * 0.35f, head.Y - hr * 0.35f), CenterColor = Color.FromArgb(255, 226, 200), SurroundColors = new[] { Color.FromArgb(214, 166, 136) } })
+                g.FillPath(b, hp);
+        }
         using (var b = new SolidBrush(s.Hair)) { g.FillPie(b, head.X - hr * 1.05f, head.Y - hr * 1.1f, hr * 2.1f, hr * 2.0f, 180, 180); g.FillEllipse(b, head.X - hr * 0.2f, head.Y - hr * 0.9f, hr * 1.25f, hr * 1.6f); }
         if (s.Skirt) using (var b = new SolidBrush(s.Hair)) g.FillEllipse(b, head.X + hr * 0.4f, head.Y - hr * 0.1f, hr * 0.9f, hr * 1.4f);
         if (asleep) using (var f = new Font("Segoe UI", Math.Max(7, tile * 0.16f), FontStyle.Bold)) using (var b = new SolidBrush(Color.FromArgb((int)(150 + 100 * Math.Sin(T * 2)), 120, 130, 160)))
