@@ -40,7 +40,7 @@ class ChatTree : Control
     public void Rebuild()
     {
         Rows.Clear();
-        Rows.Add(new Row { Kind = "newproject", Text = L.T("＋  New project", "＋  Project mới"), Bold = true });
+        Rows.Add(new Row { Kind = "newproject", Text = L.T("+  New project", "+  Project mới"), Bold = true });
         Rows.Add(new Row { Kind = "label", Text = ShowArchived ? L.T("ARCHIVED", "ĐÃ LƯU TRỮ") : L.T("PROJECTS", "PROJECT") });
         foreach (var p in Workspace.LiveProjects(ShowArchived))
         {
@@ -101,10 +101,9 @@ partial class MainForm
     readonly TextBox chatInput = new TextBox();
     readonly Label chatStatus = new Label(), chatTitle = new Label();
     ChatTree chatTree; Panel chatTreeHost;
-    Button bAsk, bTask, bApprove, bReject, bStop, bToken;
-    ClaudeEngine.Run chatRun; WsChat runChat;
+    Button bAsk, bTask, bApprove, bReject, bStop, bToken, bTasks;
     WsChat curChat; string curProjectId = Workspace.GeneralId;
-    bool awaitingApproval, shownReadiness;
+    bool shownReadiness;
     readonly List<int> msgOffsets = new List<int>();
 
     Panel BuildChatPage()
@@ -119,10 +118,11 @@ partial class MainForm
         // ----- Khu trò chuyện -----
         var main = new Panel { Dock = DockStyle.Fill, BackColor = Bg, Padding = new Padding(16, 4, 16, 14) };
         var top = Row(DockStyle.Top, 48);
-        chatTitle.AutoSize = false; chatTitle.Width = 520; chatTitle.Height = 40; chatTitle.Font = new Font("Segoe UI", 11.5f, FontStyle.Bold); chatTitle.ForeColor = Ink; chatTitle.TextAlign = ContentAlignment.MiddleLeft; chatTitle.AutoEllipsis = true;
+        chatTitle.AutoSize = false; chatTitle.Width = 340; chatTitle.Height = 40; chatTitle.Font = new Font("Segoe UI", 11.5f, FontStyle.Bold); chatTitle.ForeColor = Ink; chatTitle.TextAlign = ContentAlignment.MiddleLeft; chatTitle.AutoEllipsis = true;
+        bTasks = Btn(L.T("Tasks", "Việc"), 120);
         bToken = Btn(L.T("Claude sign-in…", "Đăng nhập Claude…"), 160);
         chatStatus.AutoSize = true; chatStatus.ForeColor = Dim; chatStatus.Margin = new Padding(6, 14, 0, 0); chatStatus.Font = new Font("Segoe UI", 9.5f);
-        top.Controls.AddRange(new Control[] { chatTitle, bToken, chatStatus });
+        top.Controls.AddRange(new Control[] { chatTitle, bTasks, bToken, chatStatus });
 
         chatLog.Dock = DockStyle.Fill; chatLog.ReadOnly = true; chatLog.BorderStyle = BorderStyle.None; chatLog.BackColor = Theme.List; chatLog.ForeColor = Ink;
         chatLog.Font = new Font("Segoe UI", 10.5f); chatLog.DetectUrls = true; chatLog.HideSelection = false;
@@ -157,8 +157,9 @@ partial class MainForm
         bAsk.Click += (s, e) => Ask();
         bTask.Click += (s, e) => PlanTask();
         bApprove.Click += (s, e) => DoTask();
-        bReject.Click += (s, e) => { awaitingApproval = false; SetChatBusy(false); AddMsg(runChat ?? curChat, "note", L.T("Plan cancelled. Nothing was changed.", "Đã huỷ kế hoạch. Chưa có gì bị thay đổi.")); };
-        bStop.Click += (s, e) => { if (chatRun != null) chatRun.Stop(); };
+        bReject.Click += (s, e) => { if (curChat == null) return; approvals.Remove(curChat.Id); UpdateButtons(); AddMsg(curChat, "note", L.T("Plan cancelled. Nothing was changed.", "Đã huỷ kế hoạch. Chưa có gì bị thay đổi.")); };
+        bStop.Click += (s, e) => { ClaudeEngine.Run r; if (curChat != null && runs.TryGetValue(curChat.Id, out r)) r.Stop(); };
+        bTasks.Click += (s, e) => TasksDialog();
         bToken.Click += (s, e) => TokenDialog();
         chatInput.KeyDown += (s, e) => { if (e.Control && e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; Ask(); } };
         // Bấm chuột phải vào một tin nhắn: phân nhánh từ đó
@@ -206,11 +207,11 @@ partial class MainForm
                     "• Hỏi: hỏi về dự án, tài liệu và ghi nhớ đã xác minh. Chỉ đọc.\n" +
                     "• Giao việc: mô tả việc cần làm. Claude lập kế hoạch trước, chỉ bắt đầu khi bạn duyệt. Claude được sửa file trong project này và chạy test, nhưng không bao giờ đẩy code, commit, phát hành hay xoá.\n" +
                     "• Rê chuột vào project hoặc chat ở thanh bên, bấm ⋯ để đổi tên, phân nhánh, chuyển, lưu trữ hoặc xoá. Bấm chuột phải vào tin nhắn để phân nhánh từ đó."), Dim);
-            if (proj.Path == null) Say(L.T("Tip: tasks need a project with a folder. Create one with ＋ New project.", "Mẹo: giao việc cần một project có thư mục. Tạo bằng ＋ Project mới."), Dim);
+            if (proj.Path == null) Say(L.T("Tip: tasks need a project with a folder. Create one with + New project.", "Mẹo: giao việc cần một project có thư mục. Tạo bằng + Project mới."), Dim);
         }
         else foreach (var m in c.Messages) RenderMsg(m);
         RefreshTree();
-        SetChatBusy(chatRun != null, awaitingApproval && runChat == curChat);
+        UpdateButtons();
     }
 
     void RenderMsg(WsMessage m)
@@ -246,12 +247,6 @@ partial class MainForm
     }
     void AddMsgAsync(WsChat c, string role, string text) { try { BeginInvoke(new Action(() => AddMsg(c, role, text))); } catch { } }
 
-    void SetChatBusy(bool busy, bool approval = false)
-    {
-        bAsk.Enabled = bTask.Enabled = !busy && !approval;
-        bApprove.Visible = bReject.Visible = approval;
-        bStop.Visible = busy;
-    }
 
     bool EnsureReady()
     {
@@ -264,18 +259,34 @@ partial class MainForm
 
     WsChat EnsureChat() { if (curChat == null) { curChat = Workspace.NewChat(curProjectId); RefreshTree(); } return curChat; }
 
-    // ---------- Hỏi / Giao việc ----------
+    // ---------- Hỏi / Giao việc (mỗi chat một lượt chạy riêng → nhiều việc chạy song song) ----------
+    readonly Dictionary<string, ClaudeEngine.Run> runs = new Dictionary<string, ClaudeEngine.Run>();
+    readonly HashSet<string> approvals = new HashSet<string>();
+    bool CurBusy { get { return curChat != null && runs.ContainsKey(curChat.Id); } }
+    bool CurAwaiting { get { return curChat != null && approvals.Contains(curChat.Id); } }
+
+    void UpdateButtons()
+    {
+        bool busy = CurBusy, appr = CurAwaiting;
+        bAsk.Enabled = bTask.Enabled = !busy && !appr;
+        bApprove.Visible = bReject.Visible = appr && !busy;
+        bStop.Visible = busy;
+        int open = Workspace.Data.Tasks.Count(t => t.ProjectId == curProjectId && t.Open), running = runs.Count;
+        bTasks.Text = L.T("Tasks", "Việc") + (open > 0 ? " (" + open + ")" : "") + (running > 0 ? "  ●" + running : "");
+    }
+    void SetChatBusy(bool busy, bool approval = false) { UpdateButtons(); }
+
     void Ask()
     {
         var q = chatInput.Text.Trim();
-        if (q.Length == 0 || chatRun != null || awaitingApproval) return;
+        if (q.Length == 0 || CurBusy || CurAwaiting) return;
         if (!EnsureReady()) return;
         var c = EnsureChat(); var proj = CurProject;
         chatInput.Clear();
         string history = HistoryFor(c);
         AddMsg(c, "user", q);
         string prompt = history + q + (proj.Path != null ? "\n\n(" + L.T("Current project: ", "Project đang chọn: ") + proj.Path + ")" : "");
-        RunEngine(c, prompt, ClaudeEngine.Mode.Ask, null);
+        RunEngine(c, prompt, ClaudeEngine.Mode.Ask, null, null);
     }
 
     // Nhánh tách từ giữa cuộc trò chuyện chưa có phiên Claude: gửi kèm phần hội thoại đã chép để Claude nắm ngữ cảnh
@@ -290,47 +301,70 @@ partial class MainForm
         return sb.Append("\n---\n").ToString();
     }
 
+    readonly Dictionary<string, string> taskTitles = new Dictionary<string, string>();
+
     void PlanTask()
     {
         var t = chatInput.Text.Trim(); var proj = CurProject;
         if (t.Length == 0) { Say(L.T("Describe the task in the box below first.", "Hãy mô tả việc cần làm ở ô bên dưới trước."), Dim); return; }
         if (proj.Path == null || !Directory.Exists(proj.Path)) { Say(L.T("Tasks run inside a project folder. Pick or create a project with a folder first.", "Việc phải làm trong thư mục của một project. Hãy chọn hoặc tạo project có thư mục trước."), Bad); return; }
-        if (chatRun != null || !EnsureReady()) return;
+        if (CurBusy || !EnsureReady()) return;
         var c = EnsureChat();
         chatInput.Clear();
+        taskTitles[c.Id] = t;
         AddMsg(c, "user", L.T("Task: ", "Việc cần làm: ") + t);
         AddMsg(c, "note", L.T("Making a plan (nothing will be changed yet)…", "Đang lập kế hoạch (chưa thay đổi gì)…"));
-        RunEngine(c, L.T("Task: ", "Việc cần làm: ") + t + "\n\n" + L.T(
+        RunEngine(c, HistoryFor(c) + L.T("Task: ", "Việc cần làm: ") + t + "\n\n" + L.T(
             "Investigate this project and write a short numbered plan for the task: the files you will change, how you will verify it (tests/build), and any risk. Do NOT change anything yet – the user must approve the plan first.",
             "Hãy tìm hiểu dự án này và viết một kế hoạch ngắn, đánh số cho việc trên: các file sẽ sửa, cách kiểm tra (test/build), và rủi ro nếu có. CHƯA được thay đổi gì – người dùng phải duyệt kế hoạch trước."),
-            ClaudeEngine.Mode.Plan, res =>
+            ClaudeEngine.Mode.Plan, null, res =>
             {
                 if (res.Error) return;
-                awaitingApproval = true;
-                AddMsg(c, "note", L.T("Approve this plan? Claude will then edit files in ", "Duyệt kế hoạch này? Sau đó Claude sẽ sửa file trong ") + proj.Path + L.T(" and run checks. It cannot push, commit, release or delete.", " và chạy kiểm tra. Claude không được đẩy code, commit, phát hành hay xoá."));
-                SetChatBusy(false, true);
+                approvals.Add(c.Id);
+                bool git = TaskBranches.IsRepo(proj.Path);
+                AddMsg(c, "note", git
+                    ? L.T("Approve this plan? Claude will work on a separate branch, so your current code stays untouched. You review the changes and choose to merge or discard.", "Duyệt kế hoạch này? Claude sẽ làm trên một nhánh riêng nên code hiện tại của bạn không bị đụng tới. Xong việc bạn xem thay đổi rồi chọn gộp hoặc bỏ.")
+                    : L.T("Approve this plan? This folder is not a git repository, so Claude will edit files directly in ", "Duyệt kế hoạch này? Thư mục này chưa phải repo git nên Claude sẽ sửa thẳng trong ") + proj.Path + L.T(" (no undo). Tip: create the project with git to work on safe branches.", " (không hoàn tác được). Mẹo: tạo project có git để làm trên nhánh an toàn."));
+                UpdateButtons();
             });
     }
 
     void DoTask()
     {
-        var c = runChat ?? curChat; if (!awaitingApproval || c == null || chatRun != null) return;
-        awaitingApproval = false;
+        var c = curChat; if (c == null || !approvals.Contains(c.Id) || CurBusy) return;
+        approvals.Remove(c.Id);
         var proj = Workspace.Project(c.ProjectId);
-        AddMsg(c, "note", L.T("Approved. Working…", "Đã duyệt. Đang làm…"));
-        RunEngine(c, L.T("The user approved the plan. Carry it out now in this project, verify it, then give a short report: files changed, how you verified, what is left. Do not commit or push.",
-                         "Người dùng đã duyệt kế hoạch. Hãy thực hiện ngay trong dự án này, kiểm tra lại, rồi báo cáo ngắn: các file đã sửa, đã kiểm tra thế nào, còn gì chưa xong. Không commit, không đẩy code."),
-            ClaudeEngine.Mode.Task, res => { if (!res.Error) AddMsg(c, "note", L.T("Done. Review the changes in ", "Xong. Hãy xem lại thay đổi trong ") + proj.Path + L.T(" (e.g. git diff) before you commit.", " (vd. git diff) trước khi commit.")); });
+        string title; if (!taskTitles.TryGetValue(c.Id, out title)) title = c.Title;
+        WsTask task = null;
+        if (TaskBranches.IsRepo(proj.Path))
+        {
+            try { task = TaskBranches.Start(proj, c.Id, title); }
+            catch (Exception ex) { AddMsg(c, "error", ex.Message); UpdateButtons(); return; }
+            AddMsg(c, "note", L.T("Approved. Working on branch ", "Đã duyệt. Đang làm trên nhánh ") + task.Branch + L.T(" – your current code is untouched.", " – code hiện tại của bạn không bị đụng tới."));
+        }
+        else AddMsg(c, "note", L.T("Approved. Working directly in the folder…", "Đã duyệt. Đang sửa trực tiếp trong thư mục…"));
+        RunEngine(c, L.T("The user approved the plan. Carry it out now in this folder, verify it, then give a short report: files changed, how you verified, what is left. Do not commit or push.",
+                         "Người dùng đã duyệt kế hoạch. Hãy thực hiện ngay trong thư mục này, kiểm tra lại, rồi báo cáo ngắn: các file đã sửa, đã kiểm tra thế nào, còn gì chưa xong. Không commit, không đẩy code."),
+            ClaudeEngine.Mode.Task, task != null ? task.Worktree : null, res =>
+            {
+                if (task != null)
+                {
+                    TaskBranches.Finish(task, res.Error ? (res.Text == L.T("Stopped.", "Đã dừng.") ? "stopped" : "failed") : "done");
+                    AddMsg(c, "note", task.Status == "nochange" ? L.T("Finished – no files were changed.", "Xong – không có file nào thay đổi.")
+                        : task.Files + L.T(" file(s) changed on branch ", " file thay đổi trên nhánh ") + task.Branch + L.T(". Open Tasks to review the diff, then Merge or Discard.", ". Mở mục Việc để xem thay đổi, rồi chọn Gộp hoặc Bỏ."));
+                }
+                else if (!res.Error) AddMsg(c, "note", L.T("Done. Review the changes in ", "Xong. Hãy xem lại thay đổi trong ") + proj.Path + ".");
+                UpdateButtons();
+            });
     }
 
-    void RunEngine(WsChat c, string prompt, ClaudeEngine.Mode mode, Action<ClaudeEngine.Result> after)
+    void RunEngine(WsChat c, string prompt, ClaudeEngine.Mode mode, string cwd, Action<ClaudeEngine.Result> after)
     {
         var proj = Workspace.Project(c.ProjectId) ?? CurProject;
-        SetChatBusy(true); runChat = c;
         try
         {
             bool fork = c.ForkNext && c.SessionId != null;
-            chatRun = ClaudeEngine.Start(prompt, proj.Path ?? Cleaner.DataDir, mode, c.SessionId,
+            runs[c.Id] = ClaudeEngine.Start(prompt, cwd ?? proj.Path ?? Cleaner.DataDir, mode, c.SessionId,
                 ev => AddMsgAsync(c, ev.Kind == "tool" ? "tool" : "assistant", ev.Text),
                 res =>
                 {
@@ -338,17 +372,94 @@ partial class MainForm
                     {
                         BeginInvoke(new Action(() =>
                         {
-                            chatRun = null;
+                            runs.Remove(c.Id);
                             if (res.SessionId != null) { c.SessionId = res.SessionId; c.ForkNext = false; Workspace.Save(); }
                             if (res.Error) AddMsg(c, "error", res.Text);
-                            SetChatBusy(false);
                             if (after != null) after(res);
+                            UpdateButtons(); RefreshTree();
                         }));
                     }
                     catch { }
                 }, fork, proj.Instructions);
         }
-        catch (Exception ex) { chatRun = null; SetChatBusy(false); AddMsg(c, "error", ex.Message); }
+        catch (Exception ex) { runs.Remove(c.Id); AddMsg(c, "error", ex.Message); }
+        UpdateButtons(); RefreshTree();
+    }
+
+    // ---------- Bảng Việc: xem thay đổi, gộp, bỏ ----------
+    void TasksDialog()
+    {
+        var proj = CurProject;
+        using (var f = SmallDialog(L.T("Tasks – ", "Việc – ") + proj.Name, 820, 470))
+        {
+            var lv = new ListView { Location = new Point(16, 16), Size = new Size(788, 360) }; Dark(lv);
+            lv.Columns.Add(L.T("Task", "Việc"), 300); lv.Columns.Add(L.T("Status", "Trạng thái"), 130); lv.Columns.Add(L.T("Files", "File"), 50); lv.Columns.Add(L.T("Branch", "Nhánh"), 190); lv.Columns.Add(L.T("Started", "Bắt đầu"), 100);
+            var showAll = new CheckBox { Text = L.T("Show merged / discarded", "Hiện cả việc đã gộp / đã bỏ"), Location = new Point(16, 384), AutoSize = true, ForeColor = Ink };
+            Action fill = () =>
+            {
+                lv.Items.Clear();
+                foreach (var t in Workspace.Data.Tasks.Where(x => x.ProjectId == proj.Id && (showAll.Checked || x.Open)).OrderByDescending(x => x.Created))
+                {
+                    bool live = runs.ContainsKey(t.ChatId) && t.Status == "running";
+                    lv.Items.Add(new ListViewItem(new[] { t.Title, TaskBranches.Label(t.Status == "running" && !live ? "interrupted" : t.Status), t.Files.ToString(), t.Branch, t.Created.ToString("dd/MM HH:mm") })
+                        { Tag = t, ForeColor = t.Status == "done" ? Good : t.Status == "failed" ? Bad : t.Open ? Ink : Dim });
+                }
+                if (lv.Items.Count == 0) lv.Items.Add(new ListViewItem(new[] { L.T("No tasks yet. Use \"Do task…\" in a chat.", "Chưa có việc nào. Dùng \"Giao việc…\" trong một chat."), "", "", "", "" }));
+            };
+            showAll.CheckedChanged += (s, e) => fill();
+            Func<WsTask> sel = () => lv.SelectedItems.Count > 0 ? lv.SelectedItems[0].Tag as WsTask : null;
+            var bDiff = Btn(L.T("View changes", "Xem thay đổi"), 130, true); bDiff.Location = new Point(16, 418);
+            var bMerge = Btn(L.T("Merge", "Gộp"), 90); bMerge.Location = new Point(154, 418);
+            var bDiscard = Btn(L.T("Discard", "Bỏ"), 90); bDiscard.Location = new Point(252, 418); bDiscard.ForeColor = Bad;
+            var bFolder = Btn(L.T("Open folder", "Mở thư mục"), 110); bFolder.Location = new Point(350, 418);
+            var bCode = Btn("VS Code", 90); bCode.Location = new Point(468, 418);
+            var bStopT = Btn(L.T("Stop", "Dừng"), 80); bStopT.Location = new Point(566, 418);
+            var close = Btn(L.T("Close", "Đóng"), 100); close.Location = new Point(704, 418); close.DialogResult = DialogResult.Cancel;
+            bDiff.Click += (s, e) => { var t = sel(); if (t != null) DiffDialog(t, proj); };
+            bMerge.Click += (s, e) =>
+            {
+                var t = sel(); if (t == null || !t.Open || t.Status == "running") return;
+                if (!Confirm(L.T("Merge branch ", "Gộp nhánh ") + t.Branch + L.T(" (", " (") + t.Files + L.T(" files) into your current branch of ", " file) vào nhánh hiện tại của ") + proj.Name + "?")) return;
+                try { MessageBox.Show(f, TaskBranches.Merge(t, proj), Text); } catch (Exception ex) { MessageBox.Show(f, ex.Message, Text); }
+                fill(); UpdateButtons();
+            };
+            bDiscard.Click += (s, e) =>
+            {
+                var t = sel(); if (t == null || !t.Open) return;
+                if (runs.ContainsKey(t.ChatId) && t.Status == "running") { MessageBox.Show(f, L.T("Stop the task first.", "Hãy dừng việc trước."), Text); return; }
+                if (!Confirm(L.T("Discard branch ", "Bỏ nhánh ") + t.Branch + L.T(" and all its changes? This cannot be undone. Your main code is not affected.", " và mọi thay đổi trên đó? Không hoàn tác được. Code chính của bạn không bị ảnh hưởng."))) return;
+                TaskBranches.Discard(t, proj); fill(); UpdateButtons();
+            };
+            bFolder.Click += (s, e) => { var t = sel(); if (t != null && Directory.Exists(t.Worktree)) try { Process.Start("explorer.exe", "\"" + t.Worktree + "\""); } catch { } };
+            bCode.Click += (s, e) => { var t = sel(); if (t != null && Directory.Exists(t.Worktree)) try { Process.Start(new ProcessStartInfo("cmd.exe", "/c code \"" + t.Worktree + "\"") { CreateNoWindow = true, UseShellExecute = false }); } catch { } };
+            bStopT.Click += (s, e) => { var t = sel(); ClaudeEngine.Run r; if (t != null && runs.TryGetValue(t.ChatId, out r)) r.Stop(); };
+            lv.DoubleClick += (s, e) => { var t = sel(); if (t != null) DiffDialog(t, proj); };
+            var refresh = new Timer { Interval = 2000 }; refresh.Tick += (s, e) => { var id = sel() != null ? sel().Id : null; fill(); if (id != null) foreach (ListViewItem it in lv.Items) if (it.Tag is WsTask && ((WsTask)it.Tag).Id == id) it.Selected = true; }; refresh.Start();
+            fill();
+            f.Controls.AddRange(new Control[] { lv, showAll, bDiff, bMerge, bDiscard, bFolder, bCode, bStopT, close });
+            f.CancelButton = close;
+            f.ShowDialog(this);
+            refresh.Dispose();
+        }
+    }
+
+    void DiffDialog(WsTask t, WsProject proj)
+    {
+        using (var f = SmallDialog(t.Branch + "  ·  " + t.Title, 980, 680))
+        {
+            f.FormBorderStyle = FormBorderStyle.Sizable; f.MaximizeBox = true;
+            var rt = new RichTextBox { Dock = DockStyle.Fill, ReadOnly = true, BorderStyle = BorderStyle.None, BackColor = Theme.List, ForeColor = Ink, Font = new Font("Consolas", 9.75f), WordWrap = false };
+            f.Controls.Add(rt);
+            Action<string, Color> put = (s, c) => { rt.SelectionStart = rt.TextLength; rt.SelectionColor = c; rt.AppendText(s + "\n"); };
+            put(TaskBranches.Diff(t, proj, true), Accent); put("", Ink);
+            foreach (var line in TaskBranches.Diff(t, proj, false).Split('\n'))
+            {
+                var l = line.TrimEnd('\r');
+                put(l, l.StartsWith("+++") || l.StartsWith("---") || l.StartsWith("diff ") ? Accent : l.StartsWith("+") ? Good : l.StartsWith("-") ? Bad : l.StartsWith("@@") ? Color.FromArgb(139, 92, 246) : Ink);
+            }
+            rt.SelectionStart = 0; rt.ScrollToCaret();
+            f.ShowDialog(this);
+        }
     }
 
     // ---------- Menu ⋯ ----------

@@ -26,7 +26,7 @@ public class WsChat
     public List<WsMessage> Messages { get; set; }
 }
 
-public class WsStore { public List<WsProject> Projects { get; set; } public List<WsChat> Chats { get; set; } }
+public class WsStore { public List<WsProject> Projects { get; set; } public List<WsChat> Chats { get; set; } public List<WsTask> Tasks { get; set; } }
 
 static class Workspace
 {
@@ -49,6 +49,8 @@ static class Workspace
                 if (store.Projects == null) store.Projects = new List<WsProject>();
                 if (store.Chats == null) store.Chats = new List<WsChat>();
                 foreach (var c in store.Chats) if (c.Messages == null) c.Messages = new List<WsMessage>();
+                if (store.Tasks == null) store.Tasks = new List<WsTask>();
+                foreach (var t in store.Tasks.Where(t => t.Status == "running")) t.Status = "interrupted";   // app bị tắt khi việc đang chạy
                 if (!store.Projects.Any(p => p.Id == GeneralId))
                     store.Projects.Insert(0, new WsProject { Id = GeneralId, Name = L.T("General", "Chung"), Created = DateTime.Now });
                 // Dọn thùng rác quá 30 ngày
@@ -91,7 +93,7 @@ static class Workspace
                 throw new IOException(L.T("That folder already exists and is not empty: ", "Thư mục đã có và không trống: ") + path);
             Directory.CreateDirectory(path);
             File.WriteAllText(Path.Combine(path, "README.md"), "# " + name + "\n\n" + (string.IsNullOrWhiteSpace(instructions) ? "" : instructions.Trim() + "\n"), new UTF8Encoding(false));
-            if (gitInit) Git(path, "init -q");
+            if (gitInit) { Git(path, "init -q"); TaskBranches.EnsureFirstCommit(path); }
         }
         else
         {
