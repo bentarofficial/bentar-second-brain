@@ -86,6 +86,16 @@ sb recall "payments"               # verified memories only
 
 Codex asks you to approve new hooks once: run `/hooks` in Codex. Open a **new** agent session after connecting. If an agent update wipes its config, the background station reconnects it within 30 minutes.
 
+### Chat with your brain and hand it tasks
+
+The **Chat** page talks to your Second Brain using your own Claude plan (Claude Code, no extra API cost):
+
+- **Ask**: questions about your projects, documents and verified memories. Read-only.
+- **Do task**: pick a project and describe the work. Claude first writes a plan without changing anything; it starts only after you click **Approve plan**. It may edit files in that project and run its tests, but pushing, committing, releasing, deleting and web downloads are blocked. You review the changes (e.g. `git diff`) and commit yourself.
+- Live progress shows each step (files read, commands run); **Stop** ends it at once.
+
+Setup once: run `claude setup-token` in a terminal, then click **Claude sign-in…** on the Chat page and paste the token. It is encrypted with your Windows account and never goes into memory or backups.
+
 ### Only learns what is proven
 
 - **Trusted sources.** Every project is scored from checkable signals: tests, CI, releases, recent maintenance, docs. Code with tests or CI that is also released or maintained is **✓ trusted**; the rest is **⚠ unverified**; scratch, temp and archive folders are **excluded** and hidden from agents. Search results carry these labels, and agents are told to follow only trusted code. You decide in Settings → **Trusted sources** (Trust / Exclude / Auto).
