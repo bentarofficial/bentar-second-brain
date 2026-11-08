@@ -95,6 +95,59 @@ class ChatTree : Control
     }
 }
 
+// Thanh kéo mức effort: Tự động (mặc định của model) · low · medium · high · xhigh · max
+class EffortSlider : Control
+{
+    static readonly string[] Stops = { null, "low", "medium", "high", "xhigh", "max" };
+    int idx; bool drag;
+    public string DefaultLevel;                 // mức mặc định của model đang chọn (để hiện ở nấc Tự động)
+    public event Action<string> Changed;
+    public string Level { get { return Stops[idx]; } set { idx = Math.Max(0, Array.IndexOf(Stops, string.IsNullOrEmpty(value) ? null : value)); Invalidate(); } }
+    readonly ToolTip tip = new ToolTip();
+    public EffortSlider()
+    {
+        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+        Cursor = Cursors.Hand;
+        tip.SetToolTip(this, L.T("How hard Claude thinks. Higher = smarter on hard tasks, slower and uses more of your plan. Auto = the model's default.",
+            "Claude suy nghĩ kỹ tới đâu. Cao hơn = giỏi hơn với việc khó, nhưng chậm hơn và tốn hạn mức hơn. Tự động = mặc định của model."));
+    }
+    const int LabelW = 104;
+    RectangleF Track { get { return new RectangleF(LabelW + 8, Height / 2f - 2, Width - LabelW - 20, 4); } }
+    float X(int i) { var t = Track; return t.X + t.Width * i / (Stops.Length - 1); }
+    void SetFrom(int x)
+    {
+        var t = Track; int i = (int)Math.Round((x - t.X) / t.Width * (Stops.Length - 1));
+        i = Math.Max(0, Math.Min(Stops.Length - 1, i));
+        if (i != idx) { idx = i; Invalidate(); if (Changed != null) Changed(Stops[idx]); }
+    }
+    protected override void OnMouseDown(MouseEventArgs e) { drag = true; SetFrom(e.X); base.OnMouseDown(e); }
+    protected override void OnMouseMove(MouseEventArgs e) { if (drag) SetFrom(e.X); base.OnMouseMove(e); }
+    protected override void OnMouseUp(MouseEventArgs e) { drag = false; base.OnMouseUp(e); }
+    protected override void OnMouseWheel(MouseEventArgs e) { SetFrom((int)X(Math.Max(0, Math.Min(Stops.Length - 1, idx + (e.Delta > 0 ? 1 : -1))))); base.OnMouseWheel(e); }
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics; g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        g.Clear(BackColor);
+        string name = idx == 0 ? L.T("Auto", "Tự động") + (DefaultLevel != null ? " (" + DefaultLevel + ")" : "") : Stops[idx];
+        TextRenderer.DrawText(g, L.T("Effort: ", "Effort: ") + name, new Font("Segoe UI", 8.5f, FontStyle.Bold), new Rectangle(4, 0, LabelW + 4, Height), idx >= 4 ? Theme.Accent : Theme.Dim,
+            TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.EndEllipsis);
+        var t = Track;
+        using (var b = new SolidBrush(Theme.Border)) g.FillRectangle(b, t);
+        // Đoạn đã chọn: chuyển màu từ xanh lá (nhẹ) sang cyan/tím (tối đa)
+        if (idx > 0)
+        {
+            var filled = new RectangleF(t.X, t.Y, X(idx) - t.X, t.Height);
+            using (var b = new System.Drawing.Drawing2D.LinearGradientBrush(new RectangleF(t.X - 1, t.Y, t.Width + 2, t.Height), Theme.Good, Theme.Violet, 0f)) g.FillRectangle(b, filled);
+        }
+        for (int i = 0; i < Stops.Length; i++)
+        {
+            float x = X(i), r = i == idx ? 7 : 3;
+            using (var b = new SolidBrush(i <= idx ? (i == idx ? Color.White : Theme.Accent) : Theme.Border)) g.FillEllipse(b, x - r, Height / 2f - r, r * 2, r * 2);
+            if (i == idx) using (var p = new Pen(Theme.Accent, 2)) g.DrawEllipse(p, x - r, Height / 2f - r, r * 2, r * 2);
+        }
+    }
+}
+
 partial class MainForm
 {
     readonly RichTextBox chatLog = new RichTextBox();
@@ -142,7 +195,32 @@ partial class MainForm
         bAsk = Btn("↑", 36, true); bAsk.Dock = DockStyle.Right; bAsk.Font = new Font("Segoe UI", 12f, FontStyle.Bold);
         bStop = Btn("■", 36); bStop.Dock = DockStyle.Right; bStop.Visible = false;
         Round.Button(bAsk, 17); Round.Button(bStop, 17);
-        bar.Controls.AddRange(new Control[] { hint, bTask, bStop, bAsk });
+        // Chọn model (menu) + thanh kéo effort, nhớ lựa chọn cho các lần sau
+        var bModel = Btn("", 150); bModel.Dock = DockStyle.Left; bModel.BackColor = Panel2;
+        var effort = new EffortSlider { Dock = DockStyle.Left, Width = 250, BackColor = Panel2 };
+        Action syncModel = () =>
+        {
+            var m = L.Get("chat.model", "");
+            var item = ClaudeEngine.Models.FirstOrDefault(x => x.Item1 == m) ?? ClaudeEngine.Models[0];
+            bModel.Text = "◆ " + (L.Vi ? item.Item2 : item.Item3).Split('—')[0].Trim() + "  ▾";
+            effort.DefaultLevel = ClaudeEngine.DefaultEffort(m);
+            effort.Invalidate();
+        };
+        bModel.Click += (s, e) =>
+        {
+            var menu = new ContextMenuStrip { Renderer = new DarkMenu(), ShowImageMargin = false, Font = new Font("Segoe UI", 10f) };
+            var cur = L.Get("chat.model", "");
+            foreach (var m in ClaudeEngine.Models)
+            {
+                var id = m.Item1;
+                menu.Items.Add(new ToolStripMenuItem((cur == id ? "✓  " : "     ") + (L.Vi ? m.Item2 : m.Item3), null, (s2, e2) => { L.Set("chat.model", id); syncModel(); }) { ForeColor = Ink });
+            }
+            menu.Show(bModel, new Point(0, 0), ToolStripDropDownDirection.AboveRight);
+        };
+        effort.Level = L.Get("chat.effort", "");
+        effort.Changed += lv => L.Set("chat.effort", lv ?? "");
+        syncModel();
+        bar.Controls.AddRange(new Control[] { hint, effort, bModel, bTask, bStop, bAsk });
         card.Controls.Add(chatInput); card.Controls.Add(bar);
         // Thanh duyệt kế hoạch: chỉ hiện khi có kế hoạch đang chờ
         var approveBar = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 44, BackColor = Bg, Visible = false, Padding = new Padding(0, 6, 0, 0) };

@@ -1,4 +1,4 @@
-// Bentar Second Brain - dọn các mục an toàn, có chế độ tự động theo lịch
+﻿// Bentar Second Brain - dọn các mục an toàn, có chế độ tự động theo lịch
 // Chạy "app.exe /auto" để dọn ngầm theo cài đặt đã lưu (dùng cho Task Scheduler)
 using System;
 using System.Collections.Generic;
@@ -13,7 +13,7 @@ using System.Windows.Forms;
 
 [assembly: System.Reflection.AssemblyTitle("Bentar Second Brain")]
 [assembly: System.Reflection.AssemblyProduct("Bentar Second Brain")]
-[assembly: System.Reflection.AssemblyVersion("2.10.1.0")]
+[assembly: System.Reflection.AssemblyVersion("2.10.2.0")]
 
 // Cập nhật từ GitHub Releases: so sánh tag (vd "v2.1.0") với phiên bản app, tải file .exe mới rồi tự thay thế
 static class Updater

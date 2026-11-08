@@ -103,6 +103,17 @@ static class ClaudeEngine
     }
     static string Quote(string a) { return a.Length > 0 && a.IndexOfAny(new[] { ' ', '(', ')', '&', '^', '|', '<', '>', '*', '"', ',' }) < 0 ? a : "\"" + a.Replace("\"", "\\\"") + "\""; }
 
+    // Model chọn được (bí danh của Claude Code luôn trỏ tới bản mới nhất) và mức effort mặc định của từng model.
+    // Mọi model hiện tại đều nhận đủ 5 mức effort: low, medium, high, xhigh, max.
+    public static readonly Tuple<string, string, string>[] Models = {
+        Tuple.Create("", "Mặc định", "Default"),
+        Tuple.Create("fable", "Fable — mạnh nhất", "Fable — most capable"),
+        Tuple.Create("opus", "Opus — cân bằng", "Opus — balanced"),
+        Tuple.Create("sonnet", "Sonnet — nhanh", "Sonnet — fast"),
+        Tuple.Create("haiku", "Haiku — rất nhanh, rẻ", "Haiku — fastest, cheapest") };
+    public static readonly string[] Efforts = { "low", "medium", "high", "xhigh", "max" };
+    public static string DefaultEffort(string model) { return model == "opus" || model == "haiku" ? "medium" : model == "" ? null : "high"; }
+
     // Không bao giờ cho agent tự làm những việc khó đảo ngược hoặc lộ ra ngoài
     static readonly string[] Forbidden = {
         "Bash(git push:*)", "Bash(git reset:*)", "Bash(git clean:*)", "Bash(git checkout --:*)", "Bash(git branch -D:*)", "Bash(git rebase:*)", "Bash(git commit:*)",
@@ -165,6 +176,10 @@ static class ClaudeEngine
             args.Add("--max-turns"); args.Add("120");
         }
         args.Add("--disallowedTools"); args.AddRange(Forbidden);
+        // Model và mức effort người dùng chọn dưới ô chat (trống = để Claude Code dùng mặc định của model)
+        var model = L.Get("chat.model", ""); var effort = L.Get("chat.effort", "");
+        if (model != "" && Models.Any(m => m.Item1 == model)) { args.Add("--model"); args.Add(model); }
+        if (Efforts.Contains(effort)) { args.Add("--effort"); args.Add(effort); }
         if (!string.IsNullOrEmpty(resume)) { args.Add("--resume"); args.Add(resume); if (fork) args.Add("--fork-session"); }
 
         var run = new Run();
