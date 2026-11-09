@@ -16,6 +16,8 @@ class OfficeView : Control
     public class Staff
     {
         public string Key, Name, Role, LinkName; public string[] Clients; public Color Shirt, Hair; public bool Skirt;
+        // Nhân viên nội bộ: một chức năng của app (bảo trì, sao lưu, thủ thư, thư ký) – luôn có mặt, bấm vào mở trang của họ
+        public bool Internal, Hat; public string Page; public string[] Actions;   // Actions: các công cụ agent gọi mà người này phụ giúp
         public float DeskX, DeskY;                 // toạ độ bàn (ô sàn)
         public bool Installed = true, Connected, Known;   // Known: đã lấy được trạng thái kết nối
         public DateTime LastSeen = DateTime.MinValue, LastWork = DateTime.MinValue;
@@ -24,7 +26,9 @@ class OfficeView : Control
         public RectangleF Hit;
         public bool Working { get { return (DateTime.Now - LastWork).TotalSeconds < 20; } }
         public bool Online { get { return (DateTime.Now - LastSeen).TotalMinutes < 30; } }
-        public bool Present { get { return Key == "brain" || Key == "tools" || Connected || Online; } }
+        public bool Present { get { return Internal || Key == "brain" || Key == "tools" || Connected || Online; } }
+        public bool Helps(ActivityEntry e) { return Actions != null && Actions.Contains((e.Action ?? "").ToLowerInvariant()); }
+        public bool Owns(ActivityEntry e) { var c = (e.Client ?? "").ToLowerInvariant(); return Clients.Any(k => c.StartsWith(k)) || Helps(e); }
     }
 
     public readonly List<Staff> Team = new List<Staff>();
@@ -42,7 +46,7 @@ class OfficeView : Control
     readonly List<Flyer> flyers = new List<Flyer>();
     // Trưởng phòng mang báo cáo tới Chỉ huy
 
-    const float W = 17, H = 13;   // kích thước sàn (ô)
+    const float W = 17, H = 17;   // kích thước sàn (ô) – dãy hậu cần ở y 12.6..16.6
     float tile = 60, ox, oy;
 
     public OfficeView()
@@ -58,6 +62,13 @@ class OfficeView : Control
         Team.Add(S("windsurf", "Windsurf", L.T("Editor specialist", "Chuyên viên biên tập code"), "Windsurf", new[] { "windsurf" }, Color.FromArgb(20, 160, 150), Color.FromArgb(120, 80, 40), 9.7f, 9.3f, false));
         Team.Add(S("cowork", "Claude Desktop · Cowork", L.T("Office & documents (Cowork)", "Văn phòng & tài liệu (Cowork)"), "Claude Desktop", new[] { "claude-ai", "claude desktop", "claude-desktop" }, Color.FromArgb(204, 120, 92), Color.FromArgb(70, 45, 30), 13.2f, 9.3f, true));
         Team.Add(S("tools", L.T("Tools & scripts", "Công cụ & script"), L.T("Automation (HTTP, sb command)", "Tự động hoá (HTTP, lệnh sb)"), null, new[] { "cli", "http", "rest", "n8n", "make", "agent", "protocol-test" }, Color.FromArgb(139, 92, 246), Color.FromArgb(50, 50, 60), 2.0f, 9.6f, false));
+        // Dãy hậu cần: các chức năng của app cũng là nhân viên thật
+        Func<string, string, string, string, string[], string[], Color, Color, float, bool, Staff> I = (k, n, r, page, cl, acts, shirt, hair, x, skirt) =>
+        { var s = S(k, n, r, null, cl, shirt, hair, x, 13.4f, skirt); s.Internal = true; s.Page = page; s.Actions = acts; return s; };
+        Team.Add(I("it", L.T("IT technician", "Kỹ thuật viên IT"), L.T("PC maintenance · cleans junk, keeps the PC healthy", "Bảo trì máy · dọn rác, giữ máy khoẻ"), "maintain", new[] { "bảo trì" }, null, Color.FromArgb(234, 88, 12), Color.FromArgb(35, 30, 28), 2.0f, false));
+        Team.Add(I("archivist", L.T("Archivist", "Thủ kho"), L.T("Brain backup · ships memory to your private GitHub", "Sao lưu bộ não · cất trí nhớ lên GitHub riêng"), "backup", new[] { "sao lưu" }, null, Color.FromArgb(100, 116, 139), Color.FromArgb(150, 150, 150), 6.2f, false));
+        Team.Add(I("librarian", L.T("Librarian", "Thủ thư"), L.T("Index & search · knows where every file on the PC is", "Lập chỉ mục & tìm kiếm · biết mọi file trên máy nằm đâu"), "search", new[] { "thủ thư" }, new[] { "search", "read_file", "list_dir", "list_projects", "project_overview", "copy" }, Color.FromArgb(22, 163, 74), Color.FromArgb(110, 60, 30), 9.7f, true));
+        Team.Add(I("secretary", L.T("Secretary", "Thư ký"), L.T("Memory · checks evidence, keeps long-term memory", "Trí nhớ · kiểm chứng bằng chứng, giữ trí nhớ dài hạn"), "memory", new[] { "thư ký" }, new[] { "remember", "recall", "revise_memory" }, Color.FromArgb(219, 39, 119), Color.FromArgb(45, 25, 20), 13.2f, true));
 
         frame.Tick += (s, e) => { if (Visible) Invalidate(); };
         poll.Tick += (s, e) => Poll();
@@ -113,12 +124,14 @@ class OfficeView : Control
     // Không cho tâm phòng trôi ra ngoài khung nhìn (phòng không bao giờ bị khuất hẳn)
     void ClampPan()
     {
-        panX = Math.Max(-Width * 0.45f, Math.Min(Width * 0.45f, panX));
-        panY = Math.Max(-Height * 0.5f, Math.Min(Height * 0.4f, panY));
+        // Cho phép kéo ra xem phố, nhưng không trôi mất khu văn phòng
+        float k = Math.Max(1, zoom);
+        panX = Math.Max(-Width * 0.6f * k, Math.Min(Width * 0.6f * k, panX));
+        panY = Math.Max(-Height * 0.7f * k, Math.Min(Height * 0.6f * k, panY));
     }
     void ZoomAt(Point m, float f)
     {
-        float nz = Math.Max(0.35f, Math.Min(5f, zoom * f)); f = nz / zoom;
+        float nz = Math.Max(0.3f, Math.Min(6f, zoom * f)); f = nz / zoom;
         float cx = Width / 2f, cy = Height * 0.56f;
         panX = m.X - cx - (m.X - cx - panX) * f; panY = m.Y - cy - (m.Y - cy - panY) * f;
         ClampPan();
@@ -182,6 +195,16 @@ class OfficeView : Control
                     st.Bubble = Short(e.Action, e.Detail); st.BubbleUntil = DateTime.Now.AddSeconds(5);
                     ReactWithWalk(st, e, recent);
                 }
+                // Thủ thư / thư ký phụ giúp khi agent tìm kiếm hoặc ghi nhớ
+                if (work) foreach (var h in Team.Where(x => x.Helps(e)))
+                {
+                    if (e.T > h.LastWork) { h.LastWork = e.T; h.LastAction = e.Action + (string.IsNullOrEmpty(e.Detail) ? "" : ": " + e.Detail); }
+                    if (e.T > lastSeenEvent)
+                    {
+                        h.Bubble = (h.Key == "librarian" ? "🔎 " : "📝 ") + Short(e.Action, e.Detail); h.BubbleUntil = DateTime.Now.AddSeconds(5);
+                        if (h.Key == "librarian") Send(h, Tuple.Create(Vault, 1.6f, L.T("Here it is 📚", "Có ngay 📚"), true));
+                    }
+                }
             }
             if (recent.Count > 0) lastSeenEvent = recent.Max(x => x.T);
             if (flyers.Count > 12) flyers.RemoveRange(0, flyers.Count - 12);
@@ -209,7 +232,7 @@ class OfficeView : Control
     {
         var c = (client ?? "").ToLowerInvariant();
         if (c == "second brain" && channel == "engine") return Team[0];
-        if (c == "trạm phát" || c == "sao lưu" || c == "second brain") return null;
+        if (c == "trạm phát" || c == "second brain") return null;
         foreach (var s in Team.Skip(1)) if (s.Clients.Any(k => c == k || c.StartsWith(k))) return s;
         return Team.First(s => s.Key == "tools");
     }
@@ -296,18 +319,19 @@ class OfficeView : Control
         // Vừa khung: sàn W x H ô, tường cao 3
         if (spin && !dragging) yaw += 0.006f;
         Camera();
-        float diag = (float)Math.Sqrt(W * W + H * H);
-        tile = Math.Max(14, Math.Min((Width - 40) / (diag * 0.707f), (Height - 50) / (diag * 0.707f * ySc + 1.5f * zSc))) * zoom;
+        // Vừa khung: phòng + một dải phố (vỉa hè, đường) xung quanh
+        float diag = (float)Math.Sqrt((W + 5) * (W + 5) + (H + 5) * (H + 5));
+        tile = Math.Max(10, Math.Min((Width - 40) / (diag * 0.707f), (Height - 50) / (diag * 0.707f * ySc + 1.5f * zSc))) * zoom;
         ox = Width / 2f + panX - (CX - CY) * tile / 2; oy = Height * 0.56f + panY - (CX + CY) * tile / 2 * ySc;
         int hour = DateTime.Now.Hour; bool night = hour < 6 || hour >= 18;
-        using (var bg = new LinearGradientBrush(ClientRectangle, night ? Color.FromArgb(22, 26, 48) : Color.FromArgb(226, 233, 245), night ? Color.FromArgb(10, 12, 24) : Color.FromArgb(244, 238, 228), 90f)) g.FillRectangle(bg, ClientRectangle);
-        // Bóng lớn dưới cả căn phòng: phòng như một mô hình nổi trên mặt bàn
-        { var c = P(CX, CY, -0.6f); float w = (float)Math.Sqrt(W * W + H * H) * tile * 0.62f, h = w * ySc * 1.05f;
-          using (var path = new GraphicsPath()) { path.AddEllipse(c.X - w / 2, c.Y - h / 2 + tile * 0.4f, w, h);
-            using (var b = new PathGradientBrush(path) { CenterColor = Color.FromArgb(night ? 150 : 90, 0, 0, 10), SurroundColors = new[] { Color.FromArgb(0, 0, 0, 10) } }) g.FillPath(b, path); } }
+        using (var bg = new LinearGradientBrush(ClientRectangle, night ? Color.FromArgb(22, 26, 48) : Color.FromArgb(150, 200, 240), night ? Color.FromArgb(10, 12, 24) : Color.FromArgb(226, 238, 248), 90f)) g.FillRectangle(bg, ClientRectangle);
 
+        queue.Clear(); behind.Clear();
+        City(night);
+        DrawCityGround(g, night);
+        foreach (var kv in behind.OrderBy(k => k.Key)) kv.Value(g);
+        Wires(g);
         DrawRoom(g, night);
-        queue.Clear();
         Furniture(night);
         foreach (var s in Team) StaffDesk(s);
         Boss();
@@ -359,8 +383,9 @@ class OfficeView : Control
             }
         Poly(g, Color.FromArgb(150, 92, 124, 140), P(5.4f, 5.2f), P(16.4f, 5.2f), P(16.4f, 11.8f), P(5.4f, 11.8f));
         Poly(g, Color.FromArgb(120, 170, 120, 90), P(0.6f, 5.8f), P(4.2f, 5.8f), P(4.2f, 8.6f), P(0.6f, 8.6f));
+        Poly(g, Color.FromArgb(120, 120, 140, 110), P(0.6f, 12.4f), P(16.4f, 12.4f), P(16.4f, 15.9f), P(0.6f, 15.9f));   // thảm dãy hậu cần
         // Vũng sáng đèn trần
-        foreach (var l in new[] { new PointF(8, 7.5f), new PointF(12.5f, 7.5f), new PointF(3, 3), new PointF(2.5f, 10f), new PointF(10, 2.5f) })
+        foreach (var l in new[] { new PointF(8, 7.5f), new PointF(12.5f, 7.5f), new PointF(3, 3), new PointF(2.5f, 10f), new PointF(10, 2.5f), new PointF(4, 14f), new PointF(9.5f, 14f), new PointF(14.5f, 14f) })
         {
             var c = P(l.X, l.Y); float w = tile * 3.4f, h = tile * 1.7f;
             using (var path = new GraphicsPath()) { path.AddEllipse(c.X - w / 2, c.Y - h / 2, w, h);
@@ -395,23 +420,212 @@ class OfficeView : Control
         // Mặt trời / mặt trăng
         if (wallN) { var c = P(10.4f + (float)Math.Sin(T * 0.05) * 0.2f, 0, 2.25f); float rr = tile * 0.22f;
           using (var b = new SolidBrush(night ? Color.FromArgb(240, 240, 220) : Color.FromArgb(255, 214, 90))) g.FillEllipse(b, c.X - rr, c.Y - rr, rr * 2, rr * 2); }
-        if (wallW) foreach (var wy in new[] { 5.5f, 9.0f })
+        if (wallW) foreach (var wy in new[] { 5.5f, 9.0f, 12.8f })
         {
             var r = new[] { P(0, wy, 1.0f), P(0, wy + 2.4f, 1.0f), P(0, wy + 2.4f, 2.6f), P(0, wy, 2.6f) };
             using (var b = new LinearGradientBrush(new PointF(0, r[3].Y - tile), new PointF(0, r[0].Y + 1), sky1, sky2)) g.FillPolygon(b, r);
             using (var pen = new Pen(Color.FromArgb(250, 250, 250), Math.Max(2, tile / 18))) g.DrawPolygon(pen, r);
         }
         // Đồng hồ treo tường chạy giờ thật
-        if (wallN) { var c = P(5.4f, 0, 2.35f); float rr = tile * 0.3f;
-          using (var b = new SolidBrush(Color.White)) g.FillEllipse(b, c.X - rr, c.Y - rr * 0.9f, rr * 2, rr * 1.8f);
-          using (var pen = new Pen(Color.FromArgb(60, 60, 70), 2)) g.DrawEllipse(pen, c.X - rr, c.Y - rr * 0.9f, rr * 2, rr * 1.8f);
-          var now = DateTime.Now; double ha = (now.Hour % 12 + now.Minute / 60.0) / 12 * Math.PI * 2, ma = now.Minute / 60.0 * Math.PI * 2, sa = now.Second / 60.0 * Math.PI * 2;
-          using (var pen = new Pen(Color.FromArgb(40, 40, 50), 2.5f)) g.DrawLine(pen, c, new PointF(c.X + (float)Math.Sin(ha) * rr * 0.5f, c.Y - (float)Math.Cos(ha) * rr * 0.45f));
-          using (var pen = new Pen(Color.FromArgb(40, 40, 50), 1.6f)) g.DrawLine(pen, c, new PointF(c.X + (float)Math.Sin(ma) * rr * 0.8f, c.Y - (float)Math.Cos(ma) * rr * 0.72f));
-          using (var pen = new Pen(Color.FromArgb(220, 60, 60), 1f)) g.DrawLine(pen, c, new PointF(c.X + (float)Math.Sin(sa) * rr * 0.85f, c.Y - (float)Math.Cos(sa) * rr * 0.76f)); }
+        if (wallN) WallClock(g, 5.0f, 2.25f, 0.5f);
         // Bảng trắng ghi phương châm
         if (wallW) { var r = new[] { P(0, 1.2f, 1.2f), P(0, 4.2f, 1.2f), P(0, 4.2f, 2.5f), P(0, 1.2f, 2.5f) };
           Poly(g, Color.White, r); using (var pen = new Pen(Color.FromArgb(150, 150, 160), 2)) g.DrawPolygon(pen, r); }
+    }
+
+    // Đồng hồ treo tường nằm đúng trên mặt tường bắc: mặt số 1–12, vạch phút, kim giờ/phút/giây chạy giờ thật
+    void WallClock(Graphics g, float cx, float cz, float R)
+    {
+        Func<double, float, PointF> At = (a, r) => P(cx + (float)Math.Sin(a) * r, 0.03f, cz + (float)Math.Cos(a) * r);
+        Func<float, PointF[]> Ring = r => Enumerable.Range(0, 48).Select(i => At(i / 48.0 * Math.PI * 2, r)).ToArray();
+        Poly(g, Color.FromArgb(60, 0, 0, 0), Ring(R * 1.08f).Select(p => new PointF(p.X + tile * 0.04f, p.Y + tile * 0.05f)).ToArray());   // bóng trên tường
+        Poly(g, Color.FromArgb(45, 52, 64), Ring(R * 1.08f));                                                                                // vành
+        using (var path = new GraphicsPath()) { path.AddPolygon(Ring(R));
+            using (var b = new PathGradientBrush(path) { CenterColor = Color.White, SurroundColors = new[] { Color.FromArgb(232, 228, 220) } }) g.FillPath(b, path); }
+        if (tile < 16) return;
+        for (int i = 0; i < 60; i++)
+        {
+            double a = i / 60.0 * Math.PI * 2; bool big = i % 5 == 0;
+            using (var pen = new Pen(Color.FromArgb(50, 50, 60), big ? Math.Max(1.4f, tile / 34) : 0.8f)) g.DrawLine(pen, At(a, R * (big ? 0.82f : 0.9f)), At(a, R * 0.96f));
+        }
+        using (var f = new Font("Segoe UI", Math.Max(5.5f, tile * 0.11f * R / 0.5f), FontStyle.Bold))
+        using (var b = new SolidBrush(Color.FromArgb(35, 38, 48)))
+            for (int h = 1; h <= 12; h++)
+            {
+                var p = At(h / 12.0 * Math.PI * 2, R * 0.66f); var t = h.ToString(); var sz = g.MeasureString(t, f);
+                g.DrawString(t, f, b, p.X - sz.Width / 2, p.Y - sz.Height / 2);
+            }
+        var now = DateTime.Now; double sec = now.Second + now.Millisecond / 1000.0;
+        double ha = (now.Hour % 12 + now.Minute / 60.0) / 12 * Math.PI * 2, ma = (now.Minute + sec / 60) / 60 * Math.PI * 2, sa = sec / 60 * Math.PI * 2;
+        var c = At(0, 0);
+        using (var pen = new Pen(Color.FromArgb(30, 32, 40), Math.Max(2.5f, tile / 16)) { StartCap = LineCap.Round, EndCap = LineCap.Round }) g.DrawLine(pen, c, At(ha, R * 0.48f));
+        using (var pen = new Pen(Color.FromArgb(30, 32, 40), Math.Max(1.6f, tile / 26)) { StartCap = LineCap.Round, EndCap = LineCap.Round }) g.DrawLine(pen, c, At(ma, R * 0.75f));
+        using (var pen = new Pen(Color.FromArgb(220, 50, 50), 1.1f)) g.DrawLine(pen, At(sa + Math.PI, R * 0.15f), At(sa, R * 0.86f));
+        using (var b = new SolidBrush(Color.FromArgb(220, 50, 50))) g.FillEllipse(b, c.X - tile * 0.035f, c.Y - tile * 0.035f, tile * 0.07f, tile * 0.07f);
+    }
+
+    // ---------- Phố xung quanh văn phòng ----------
+    // Toà nhà nằm giữa một khu phố: vỉa hè, đường vòng quanh có xe máy/ô tô chạy, quán trà đá, cà phê, phở, bánh mì
+    // vỉa hè trong (-1.8..0), đường (-5..-1.8), vỉa hè ngoài (-6.5..-5), dãy nhà ống (-10..-6.5) – đối xứng bốn phía.
+    const float GZ = -0.55f;   // mặt đất (sàn văn phòng nâng cao hơn đường)
+    readonly List<KeyValuePair<float, Action<Graphics>>> behind = new List<KeyValuePair<float, Action<Graphics>>>();
+    /// <summary>Xếp một vật ngoài phố: sau toà nhà thì vẽ trước phòng, trước toà nhà thì vẽ sau cùng. front = đang ở phía người xem.</summary>
+    void QO(float x, float y, Action<Graphics, bool> a)
+    {
+        float nx = Math.Max(0, Math.Min(W, x)), ny = Math.Max(0, Math.Min(H, y)), d = Depth(x, y);
+        if (d < Depth(nx, ny)) behind.Add(new KeyValuePair<float, Action<Graphics>>(d, g => a(g, false)));
+        else queue.Add(new KeyValuePair<float, Action<Graphics>>(1e5f + d, g => a(g, true)));
+    }
+    void Flat(Graphics g, Color c, float x0, float y0, float x1, float y1) { Poly(g, c, P(x0, y0, GZ), P(x1, y0, GZ), P(x1, y1, GZ), P(x0, y1, GZ)); }
+
+    void DrawCityGround(Graphics g, bool night)
+    {
+        Flat(g, night ? Color.FromArgb(40, 52, 44) : Color.FromArgb(150, 178, 120), -12, -12, W + 12, H + 12);        // bãi cỏ / đất
+        Flat(g, night ? Color.FromArgb(70, 72, 80) : Color.FromArgb(196, 190, 180), -6.5f, -6.5f, W + 6.5f, H + 6.5f);  // vỉa hè ngoài
+        Flat(g, night ? Color.FromArgb(34, 36, 42) : Color.FromArgb(78, 82, 92), -5, -5, W + 5, H + 5);                  // mặt đường
+        // Vạch kẻ giữa đường (nét đứt) quanh khu nhà
+        using (var pen = new Pen(Color.FromArgb(night ? 150 : 220, 245, 235, 200), Math.Max(1.2f, tile / 22)))
+        {
+            float o = -3.4f;
+            for (float t = o; t < W - o - 0.5f; t += 1.2f) { g.DrawLine(pen, P(t, o, GZ), P(t + 0.6f, o, GZ)); g.DrawLine(pen, P(t, H - o, GZ), P(t + 0.6f, H - o, GZ)); }
+            for (float t = o; t < H - o - 0.5f; t += 1.2f) { g.DrawLine(pen, P(o, t, GZ), P(o, t + 0.6f, GZ)); g.DrawLine(pen, P(W - o, t, GZ), P(W - o, t + 0.6f, GZ)); }
+        }
+        // Vạch sang đường trước cửa văn phòng
+        for (int i = 0; i < 6; i++) Flat(g, Color.FromArgb(night ? 120 : 235, 240, 240, 240), 7.4f + i * 0.4f, H + 1.9f, 7.6f + i * 0.4f, H + 4.9f);
+        Flat(g, night ? Color.FromArgb(88, 90, 98) : Color.FromArgb(214, 206, 192), -1.8f, -1.8f, W + 1.8f, H + 1.8f);  // vỉa hè trong
+        // Gạch lát vỉa hè
+        using (var pen = new Pen(Color.FromArgb(night ? 30 : 45, 90, 70, 50), 1f))
+            for (float t = -1.8f; t <= W + 1.8f; t += 0.9f) { g.DrawLine(pen, P(t, -1.8f, GZ), P(t, 0, GZ)); g.DrawLine(pen, P(t, H, GZ), P(t, H + 1.8f, GZ)); g.DrawLine(pen, P(-1.8f, t, GZ), P(0, t, GZ)); g.DrawLine(pen, P(W, t, GZ), P(W + 1.8f, t, GZ)); }
+        // Đèn đường hắt vũng sáng ban đêm
+        if (night) foreach (var l in Lamps())
+        {
+            var c = P(l.X, l.Y, GZ); float w = tile * 3.2f, h = w * ySc;
+            using (var path = new GraphicsPath()) { path.AddEllipse(c.X - w / 2, c.Y - h / 2, w, h);
+                using (var b = new PathGradientBrush(path) { CenterColor = Color.FromArgb(90, 255, 210, 140), SurroundColors = new[] { Color.FromArgb(0, 255, 210, 140) } }) g.FillPath(b, path); }
+        }
+    }
+
+    static IEnumerable<PointF> Lamps()
+    {
+        for (float t = 1; t < W; t += 5) { yield return new PointF(t, -1.6f); yield return new PointF(t + 2.5f, H + 1.6f); }
+        for (float t = 3; t < H; t += 5) { yield return new PointF(-1.6f, t); yield return new PointF(W + 1.6f, t); }
+    }
+
+    void City(bool night)
+    {
+        // Chỉ đường xá + cảnh quan: hàng cây, đèn đường trên vỉa hè, dải cây xanh ngoài đường, xe chạy
+        for (float t = 3.5f; t < W; t += 5) { Tree(t, -1.2f); Tree(t - 1, H + 1.2f); }
+        for (float t = 0.8f; t < H; t += 5) { Tree(-1.2f, t); Tree(W + 1.2f, t + 1.5f); }
+        foreach (var l in Lamps()) Lamp(l.X, l.Y, night);
+        for (float t = -6f; t < W + 6.5f; t += 3.2f) { Tree(t, -7.6f); Tree(t + 1.6f, H + 7.6f); }
+        for (float t = -2.8f; t < H + 3f; t += 3.2f) { Tree(-7.6f, t + 1.6f); Tree(W + 7.6f, t); }
+        Vehicles(night);
+    }
+
+    // Dây điện chằng chịt nối các cột đèn
+    void Wires(Graphics g)
+    {
+        var l = Lamps().ToList();
+        using (var pen = new Pen(Color.FromArgb(150, 30, 30, 35), 1f))
+            for (int i = 0; i < l.Count; i++)
+            {
+                var a = l[i]; var b = l.Where(p => p != a && (Math.Abs(p.X - a.X) < 0.01f || Math.Abs(p.Y - a.Y) < 0.01f)).OrderBy(p => Math.Abs(p.X - a.X) + Math.Abs(p.Y - a.Y)).FirstOrDefault();
+                if (b.IsEmpty) continue;
+                for (int k = 0; k < 3; k++)
+                {
+                    var pa = P(a.X, a.Y, GZ + 2.2f - k * 0.12f); var pb = P(b.X, b.Y, GZ + 2.2f - k * 0.12f);
+                    var mid = new PointF((pa.X + pb.X) / 2, (pa.Y + pb.Y) / 2 + tile * (0.35f + k * 0.12f));
+                    g.DrawBezier(pen, pa, mid, mid, pb);
+                }
+            }
+    }
+
+    void Tree(float x, float y)
+    {
+        QO(x, y, (g, front) =>
+        {
+            Shadow(g, x, y, 0.6f, 0.6f, 40);
+            Box(g, x - 0.08f, y - 0.08f, GZ, 0.16f, 0.16f, 1.3f, Color.FromArgb(110, 80, 50));
+            var c = P(x, y, GZ + 1.6f); float sway = (float)Math.Sin(T * 0.9 + x + y) * tile * 0.04f;
+            for (int k = 0; k < 6; k++)
+            {
+                double a = k / 6.0 * Math.PI * 2; float r = tile * 0.42f;
+                using (var b = new SolidBrush(k % 2 == 0 ? Color.FromArgb(46, 125, 50) : Color.FromArgb(67, 160, 71)))
+                    g.FillEllipse(b, c.X + (float)Math.Cos(a) * r * 0.6f - r * 0.6f + sway, c.Y + (float)Math.Sin(a) * r * 0.35f - r * 0.6f - (k % 2) * tile * 0.12f, r * 1.2f, r * 1.2f);
+            }
+        });
+    }
+
+    void Lamp(float x, float y, bool night)
+    {
+        QO(x, y, (g, front) =>
+        {
+            Box(g, x - 0.04f, y - 0.04f, GZ, 0.08f, 0.08f, 2.4f, Color.FromArgb(70, 75, 85));
+            var c = P(x, y, GZ + 2.45f); float r = tile * 0.1f;
+            if (night) using (var path = new GraphicsPath()) { path.AddEllipse(c.X - r * 4, c.Y - r * 4, r * 8, r * 8);
+                using (var b = new PathGradientBrush(path) { CenterColor = Color.FromArgb(160, 255, 220, 150), SurroundColors = new[] { Color.FromArgb(0, 255, 220, 150) } }) g.FillPath(b, path); }
+            using (var b = new SolidBrush(night ? Color.FromArgb(255, 236, 170) : Color.FromArgb(220, 220, 210))) g.FillEllipse(b, c.X - r, c.Y - r * 0.7f, r * 2, r * 1.4f);
+        });
+    }
+
+    // Xe chạy vòng quanh khu nhà: làn trong theo chiều kim đồng hồ, làn ngoài ngược lại
+    class Vehicle { public bool Car; public float Lane, Speed, Phase; public Color C; }
+    static readonly Vehicle[] Traffic = {
+        new Vehicle { Car = false, Lane = -2.6f, Speed = 2.6f, Phase = 0, C = Color.FromArgb(220, 38, 38) },
+        new Vehicle { Car = true, Lane = -2.6f, Speed = 2.0f, Phase = 14, C = Color.FromArgb(245, 245, 245) },
+        new Vehicle { Car = false, Lane = -2.6f, Speed = 2.9f, Phase = 31, C = Color.FromArgb(37, 99, 235) },
+        new Vehicle { Car = false, Lane = -2.6f, Speed = 2.4f, Phase = 47, C = Color.FromArgb(30, 30, 30) },
+        new Vehicle { Car = false, Lane = -2.6f, Speed = 2.2f, Phase = 62, C = Color.FromArgb(250, 204, 21) },
+        new Vehicle { Car = false, Lane = -4.2f, Speed = -2.7f, Phase = 6, C = Color.FromArgb(16, 185, 129) },
+        new Vehicle { Car = true, Lane = -4.2f, Speed = -2.1f, Phase = 22, C = Color.FromArgb(30, 64, 175) },
+        new Vehicle { Car = false, Lane = -4.2f, Speed = -3.0f, Phase = 40, C = Color.FromArgb(234, 88, 12) },
+        new Vehicle { Car = false, Lane = -4.2f, Speed = -2.3f, Phase = 55, C = Color.FromArgb(120, 120, 130) },
+        new Vehicle { Car = false, Lane = -4.2f, Speed = -2.5f, Phase = 71, C = Color.FromArgb(190, 24, 93) } };
+
+    // Vị trí trên vòng đường cách mép khu nhà một khoảng o (âm = ra ngoài)
+    static void Ring(float u, float o, out float x, out float y, out float dx, out float dy)
+    {
+        float w = W - 2 * o, h = H - 2 * o, per = 2 * (w + h); u = ((u % per) + per) % per;
+        if (u < w) { x = o + u; y = o; dx = 1; dy = 0; return; } u -= w;
+        if (u < h) { x = W - o; y = o + u; dx = 0; dy = 1; return; } u -= h;
+        if (u < w) { x = W - o - u; y = H - o; dx = -1; dy = 0; return; } u -= w;
+        x = o; y = H - o - u; dx = 0; dy = -1;
+    }
+
+    void Vehicles(bool night)
+    {
+        foreach (var v in Traffic)
+        {
+            float x, y, dx, dy; Ring(v.Phase + v.Speed * T, v.Lane, out x, out y, out dx, out dy);
+            if (v.Speed < 0) { dx = -dx; dy = -dy; }
+            float len = v.Car ? 1.5f : 0.75f, wid = v.Car ? 0.75f : 0.26f;
+            float bx = x - (dx != 0 ? len / 2 : wid / 2), by = y - (dy != 0 ? len / 2 : wid / 2), sx = dx != 0 ? len : wid, sy = dy != 0 ? len : wid;
+            var vv = v; float fx = x, fy = y, fdx = dx, fdy = dy;
+            QO(x, y, (g, front) =>
+            {
+                Shadow(g, fx, fy, sx * 0.8f, sy * 0.8f, 60);
+                if (night)
+                {
+                    var hp = P(fx + fdx * len * 1.3f, fy + fdy * len * 1.3f, GZ); float r = tile * (vv.Car ? 0.8f : 0.5f);
+                    using (var path = new GraphicsPath()) { path.AddEllipse(hp.X - r, hp.Y - r * ySc, r * 2, r * 2 * ySc);
+                        using (var b = new PathGradientBrush(path) { CenterColor = Color.FromArgb(120, 255, 240, 190), SurroundColors = new[] { Color.FromArgb(0, 255, 240, 190) } }) g.FillPath(b, path); }
+                }
+                if (vv.Car)
+                {
+                    Box(g, bx, by, GZ + 0.12f, sx, sy, 0.38f, vv.C, true);
+                    float cx0 = bx + (sx > sy ? sx * 0.22f : 0.06f), cy0 = by + (sy > sx ? sy * 0.22f : 0.06f);
+                    Box(g, cx0, cy0, GZ + 0.5f, sx > sy ? sx * 0.5f : sx - 0.12f, sy > sx ? sy * 0.5f : sy - 0.12f, 0.3f, Color.FromArgb(140, 190, 220), true);
+                }
+                else
+                {
+                    Box(g, bx, by, GZ + 0.12f, sx, sy, 0.22f, vv.C, true);
+                    Person(g, new Staff { Name = "guest", Shirt = Shade(vv.C, 0.3f), Hair = Color.FromArgb(30, 30, 30) }, fx, fy, GZ + 0.3f, false, false, false, 0);
+                    // Mũ bảo hiểm
+                    var hd = P(fx, fy, GZ + 0.35f); hd.Y -= tile * 0.42f + tile * 0.19f; float r = tile * 0.24f;
+                    using (var b = new SolidBrush(vv.C)) g.FillPie(b, hd.X - r * 1.1f, hd.Y - r * 1.15f, r * 2.2f, r * 1.6f, 180, 180);
+                }
+            });
+        }
     }
 
     void Plant(float x, float y, float size)
@@ -469,14 +683,23 @@ class OfficeView : Control
         });
         Q(0.5f, 11.85f, g => { Box(g, 0.25f, 11.6f, 0, 0.5f, 0.5f, 0.8f, Color.FromArgb(230, 230, 235), true); Box(g, 0.3f, 11.65f, 0.8f, 0.4f, 0.4f, 0.5f, Color.FromArgb(150, 200, 240)); });
         // Cây xanh khắp phòng
-        Plant(5.0f, 5.2f, 0.9f); Plant(16.2f, 2.0f, 1.3f); Plant(16.2f, 12.2f, 1.2f); Plant(5.2f, 12.2f, 1.0f); Plant(11.6f, 4.5f, 0.9f); Plant(0.3f, 4.6f, 1.1f); Plant(8.3f, 0.3f, 0.9f);
+        Plant(5.0f, 5.2f, 0.9f); Plant(16.2f, 2.0f, 1.3f); Plant(16.2f, 16.2f, 1.2f); Plant(4.9f, 16.2f, 1.0f); Plant(0.3f, 16.2f, 1.1f); Plant(16.3f, 12.0f, 0.9f);
+        // Dãy hậu cần: tủ hồ sơ của thủ kho, kệ sách của thủ thư, hộp dụng cụ của IT
+        Q(8.0f, 16.45f, g => { Box(g, 6.6f, 16.1f, 0, 2.6f, 0.6f, 1.5f, Color.FromArgb(120, 130, 145), true);
+            for (int i = 0; i < 4; i++) for (int r = 0; r < 3; r++) { var c = P(6.9f + i * 0.62f, 16.1f, 0.3f + r * 0.45f); using (var b = new SolidBrush(Color.FromArgb(220, 225, 230))) g.FillRectangle(b, c.X - tile * 0.08f, c.Y - tile * 0.02f, tile * 0.16f, tile * 0.04f); }
+            Label(g, P(8.6f, 16.85f, 0.25f), L.T("Archive", "Kho lưu trữ"), Color.FromArgb(100, 116, 139), true); });
+        Q(11.5f, 16.45f, g => { Box(g, 10.2f, 16.15f, 0, 2.6f, 0.5f, 1.9f, Color.FromArgb(150, 105, 70), true);
+            var rnd = new Random(21);
+            for (int r = 0; r < 3; r++) for (int i = 0; i < 12; i++) Box(g, 10.3f + i * 0.2f, 16.2f, 0.15f + r * 0.6f, 0.15f, 0.4f, 0.42f, Color.FromArgb(rnd.Next(80, 230), rnd.Next(60, 200), rnd.Next(60, 200)));
+            Label(g, P(11.5f, 16.4f, 2.2f), L.T("Index shelves", "Kệ chỉ mục"), Color.FromArgb(22, 163, 74), true); });
+        Q(1.4f, 12.9f, g => { Box(g, 0.9f, 12.6f, 0, 0.9f, 0.6f, 0.5f, Color.FromArgb(220, 38, 38), true); Box(g, 1.05f, 12.75f, 0.5f, 0.6f, 0.3f, 0.1f, Color.FromArgb(60, 60, 60)); }); Plant(11.6f, 4.5f, 0.9f); Plant(0.3f, 4.6f, 1.1f); Plant(8.3f, 0.3f, 0.9f);
     }
 
     // Bàn làm việc + nhân viên
     void StaffDesk(Staff s)
     {
         float x = s.DeskX, y = s.DeskY;
-        bool present = s.Present, working = present && s.Working, asleep = present && !working && !s.Online && s.Key != "brain" && s.Key != "tools";
+        bool present = s.Present, working = present && s.Working, asleep = present && !working && !s.Online && !s.Internal && s.Key != "brain" && s.Key != "tools";
         Q(x + 0.85f, y + 0.5f, g =>
         {
             Shadow(g, x + 1.0f, y + 0.55f, 1.3f, 0.7f, 40);
@@ -618,6 +841,12 @@ class OfficeView : Control
         if (asleep) using (var f = new Font("Segoe UI", Math.Max(7, tile * 0.16f), FontStyle.Bold)) using (var b = new SolidBrush(Color.FromArgb((int)(150 + 100 * Math.Sin(T * 2)), 120, 130, 160)))
             g.DrawString("z z", f, b, head.X + hr, head.Y - hr * 2 - (T * 6 % 8));
         // Biểu tượng cảm xúc nổi lên thỉnh thoảng: ý tưởng khi làm việc, cà phê/nhạc/tim khi rảnh
+        if (s.Hat)   // nón lá
+        {
+            Poly(g, Color.FromArgb(225, 200, 135), new PointF(head.X - hr * 1.55f, head.Y - hr * 0.35f), new PointF(head.X + hr * 1.55f, head.Y - hr * 0.35f), new PointF(head.X, head.Y - hr * 1.9f));
+            using (var pen = new Pen(Color.FromArgb(160, 130, 80), 1f)) { g.DrawLine(pen, head.X - hr * 0.8f, head.Y - hr * 1.1f, head.X + hr * 0.8f, head.Y - hr * 1.1f); g.DrawLine(pen, head.X - hr * 1.55f, head.Y - hr * 0.35f, head.X + hr * 1.55f, head.Y - hr * 0.35f); }
+        }
+        if (s.Name == "guest") return;   // người qua đường / khách quán: không có biểu tượng, không chấm trạng thái
         if (!asleep && s.Name != "boss")
         {
             float ph = (T * 0.5f + seed) % 7f;

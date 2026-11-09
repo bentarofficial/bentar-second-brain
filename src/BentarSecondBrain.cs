@@ -227,6 +227,7 @@ static class Cleaner
         {
             Directory.CreateDirectory(DataDir);
             File.AppendAllText(LogFile, DateTime.Now.ToString("dd/MM/yyyy HH:mm") + "  " + msg + Environment.NewLine, Encoding.UTF8);
+            try { Activity.Log("bảo trì", "maintain", L.T("cleanup", "dọn máy"), msg); } catch { }
         }
         catch { }
     }

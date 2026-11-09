@@ -36,6 +36,7 @@ partial class MainForm
         {
             var st = office.Selected;
             if (st == null) return;
+            if (st.Page != null) { ShowPage(st.Page); return; }
             if (st.Key == "brain") { ShowPage("chat"); TokenDialog(); return; }
             if (st.LinkName == null) { ShowPage("socket"); return; }
             offConnect.Enabled = false;
@@ -60,7 +61,7 @@ partial class MainForm
         if (s == null)
         {
             offName.Text = L.T("Your office", "Phòng làm việc");
-            offRole.Text = L.T("You are the commander. Each agent is a staff member at a desk. Click someone to manage them.", "Bạn là Chỉ huy. Mỗi agent là một nhân viên ngồi một bàn. Bấm vào một người để quản lý.");
+            offRole.Text = L.T("You are the commander. Each agent is a staff member at a desk. Click someone to manage them.", "Bạn là Chỉ huy. Mỗi agent và mỗi bộ phận của app là một nhân viên ngồi một bàn. Bấm vào một người để quản lý.");
             offState.Text = ""; offRecent.Text = L.T("• Green dot: working right now\n• Yellow: online, ready\n• Grey + zz: connected, idle\n• Empty desk: not connected or not installed\n\nPapers flying from the Knowledge vault are real tool calls. When Claude finishes a task, the manager brings you the report.",
                 "• Chấm xanh: đang làm việc\n• Vàng: đang trực, sẵn sàng\n• Xám + zz: đã kết nối, đang nghỉ\n• Bàn trống: chưa kết nối hoặc chưa cài\n\nHồ sơ bay ra từ Kho tri thức là các lần gọi công cụ thật. Khi Claude làm xong việc, Trưởng phòng mang báo cáo tới cho bạn.");
             offConnect.Visible = offTask.Visible = false;
@@ -69,19 +70,21 @@ partial class MainForm
         offName.Text = s.Name; offRole.Text = s.Role;
         string state; Color c;
         if (s.Present && s.Working) { state = L.T("● Working", "● Đang làm việc"); c = Good; }
+        else if (s.Internal) { state = L.T("● On duty", "● Đang trực"); c = Color.FromArgb(234, 179, 8); }
         else if (s.Present && s.Online) { state = L.T("● Online", "● Đang trực"); c = Color.FromArgb(234, 179, 8); }
         else if (s.Present) { state = L.T("● Connected · idle", "● Đã kết nối · đang nghỉ"); c = Dim; }
         else if (!s.Known) { state = L.T("Checking…", "Đang kiểm tra…"); c = Dim; }
         else if (s.Installed) { state = L.T("○ Not connected", "○ Chưa kết nối"); c = Bad; }
         else { state = L.T("○ Not installed on this PC", "○ Chưa cài trên máy"); c = Dim; }
         offState.Text = state; offState.ForeColor = c;
-        var recent = Activity.Recent(300).Where(e => s.Clients.Any(k => (e.Client ?? "").ToLowerInvariant().StartsWith(k)) && e.Action != "cắm vào").Take(8).ToList();
+        var recent = Activity.Recent(300).Where(e => s.Owns(e) && e.Action != "cắm vào").Take(8).ToList();
         offRecent.Text = (s.LastSeen > DateTime.MinValue ? L.T("Last seen: ", "Lần cuối: ") + s.LastSeen.ToString("dd/MM HH:mm") + "\n" : "") +
             L.T("Recent work:\n", "Việc gần đây:\n") + (recent.Count == 0 ? L.T("  (nothing yet)", "  (chưa có)") :
             string.Join("\n", recent.Select(e => "  " + e.T.ToString("HH:mm") + "  " + e.Action + (string.IsNullOrEmpty(e.Detail) ? "" : ": " + (e.Detail.Length > 40 ? e.Detail.Substring(0, 40) + "…" : e.Detail)))));
-        offTask.Visible = true;
+        offTask.Visible = !s.Internal;
         offConnect.Visible = true;
-        if (s.Key == "brain") offConnect.Text = L.T("Claude sign-in…", "Đăng nhập Claude…");
+        if (s.Internal) offConnect.Text = L.T("Open ", "Mở trang ") + s.Name;
+        else if (s.Key == "brain") offConnect.Text = L.T("Claude sign-in…", "Đăng nhập Claude…");
         else if (s.LinkName == null) offConnect.Text = L.T("Open Sockets", "Mở Ổ cắm");
         else if (!s.Installed && s.Known) { offConnect.Visible = false; }
         else offConnect.Text = s.Connected ? L.T("Disconnect", "Ngắt kết nối") : L.T("Connect", "Kết nối");

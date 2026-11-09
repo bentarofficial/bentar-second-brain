@@ -270,6 +270,7 @@ static class Brain
             Save(now, fl, pl, newTerms);
             Install(fl, pl, newTerms);
             BuiltAt = now;
+            try { Activity.Log("thủ thư", "index", L.T("indexed", "lập chỉ mục xong"), fl.Count.ToString("N0") + L.T(" files", " file")); } catch { }
             Progress = "";
         }
         finally { Building = false; }
