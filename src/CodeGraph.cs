@@ -139,7 +139,7 @@ static class CodeGraph
     }
 
     // ================= Lấy đồ thị (luôn mới) =================
-    public static string RootOf(string path)
+    public static string RootOf(string path, bool useIndex = true)
     {
         if (string.IsNullOrWhiteSpace(path)) throw new ArgumentException(L.T("Give path = the project folder (your current working directory) or a file in it.", "Cần path = thư mục dự án (thư mục đang làm việc của bạn) hoặc một file trong đó."));
         string full = Path.GetFullPath(path.Trim().Trim('"')).TrimEnd('\\');
@@ -155,6 +155,7 @@ static class CodeGraph
                 || SafeAny(x, "*.sln") || SafeAny(x, "*.csproj"))
             {
                 // Thư mục con của một dự án đã biết: dùng dự án đó (vd repo chứa nhiều gói)
+                if (!useIndex) return p;   // hook: không nạp chỉ mục toàn máy (chậm vài giây)
                 Brain.EnsureLoaded();
                 var proj = Brain.ProjectOf(p);
                 return proj != null && !IsTooBroad(proj) ? proj : p;
@@ -1003,12 +1004,14 @@ static class CodeGraph
     }
 
     // ---------- context_pack ----------
-    public static string ContextPack(string task, string path, int budgetTokens)
+    // light = bản gọn cho hook (tự đưa vào khi người dùng gửi yêu cầu): không dùng chỉ mục toàn máy, không trí nhớ/ví dụ,
+    // và trả "" nếu không đủ chắc chắn (không ký hiệu nào khớp theo tên) để không thêm nhiễu.
+    public static string ContextPack(string task, string path, int budgetTokens, bool light = false)
     {
         if (string.IsNullOrWhiteSpace(task)) throw new ArgumentException(L.T("Describe the task in task.", "Mô tả nhiệm vụ trong task."));
         budgetTokens = Math.Max(800, Math.Min(30000, budgetTokens));
         int maxChars = budgetTokens * 4;
-        var g = Get(RootOf(path));
+        var g = Get(RootOf(path, !light));
         var q = new HashSet<string>();
         foreach (var t in Brain.Tokens(task)) { q.Add(t); foreach (var w in SplitIdent(t)) q.Add(w); }
         // Nhiệm vụ viết tiếng Việt: thêm thuật ngữ tiếng Anh tương ứng (code thường đặt tên bằng tiếng Anh)
@@ -1022,7 +1025,7 @@ static class CodeGraph
 
         // Điểm file từ chỉ mục toàn văn của Second Brain
         var fileScore = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
-        try { foreach (var h in Brain.Search(task, g.Root, null, false, 60)) fileScore[h.File.Path] = h.Score; } catch { }
+        if (!light) try { foreach (var h in Brain.Search(task, g.Root, null, false, 60)) fileScore[h.File.Path] = h.Score; } catch { }
         double maxFile = fileScore.Count > 0 ? fileScore.Values.Max() : 1;
 
         var sb = new StringBuilder();
@@ -1043,6 +1046,7 @@ static class CodeGraph
             var idf = q.ToDictionary(w => w, w => Math.Log((all.Count + 1.0) / (df[w] + 1.0)));
             double idfMax = idf.Count > 0 ? Math.Max(0.1, idf.Values.Max()) : 1;
             var scored = new List<Tuple<CgSym, double>>();
+            var strong = new HashSet<CgSym>();   // khớp theo tên (hoặc gọi đúng tên) với từ hiếm
             foreach (var f in g.Files.Values)
             {
                 double fs; fileScore.TryGetValue(f.Path, out fs);
@@ -1063,10 +1067,12 @@ static class CodeGraph
                     if (!string.IsNullOrEmpty(s.Doc)) { var dw = DocWords(s.Doc); sc += q.Where(dw.Contains).Sum(w => idf[w]) / idfMax * 3; }
                     // Kiểu (class/struct) hiếm khi là chỗ cần sửa: ưu tiên hàm bên trong, trừ khi nhiệm vụ gọi đúng tên
                     if (IsType(s.Kind) && !exact.Contains(s.Name)) sc *= 0.35;
+                    if (exact.Contains(s.Name) || nameHitW.Sum(w => idf[w]) >= idfMax * 0.5) strong.Add(s);
                     if (sc > 0 && (nameHit > 0 || bodyHit >= Math.Min(2, q.Count) || exact.Contains(s.Name) || bodyHitW.Sum(w => idf[w]) >= idfMax * 0.8)) scored.Add(Tuple.Create(s, sc));
                 }
             }
             var ranked = scored.OrderByDescending(t => t.Item2).ToList();
+            if (light && (ranked.Count == 0 || !ranked.Take(3).Any(t => strong.Contains(t.Item1)) || g.Files.Count < 3)) return "";
             if (ranked.Count == 0)
             {
                 sb.Append(Header(g)).AppendLine().AppendLine(L.T("No code matched the task words. Central symbols instead:", "Không có code khớp từ khoá của nhiệm vụ. Thay vào đó là các ký hiệu trung tâm:")).AppendLine(Hubs(g, 15));
@@ -1079,16 +1085,22 @@ static class CodeGraph
             var scoreOf = new Dictionary<CgSym, double>();
             foreach (var t in ranked) scoreOf[t.Item1] = t.Item2;
 
-            sb.Append(Header(g));
-            sb.AppendLine(L.T("Task: ", "Nhiệm vụ: ") + task.Trim());
-            sb.AppendLine(L.T("Code below is the exact current source with line numbers — edit from it directly; read_file only for what is marked \"…\".", "Code dưới đây là mã hiện tại kèm số dòng — sửa trực tiếp từ đây; chỉ read_file phần có đánh dấu \"…\"."));
-            sb.AppendLine();
+            if (light)
+                sb.AppendLine(L.T("[Bentar Second Brain] Code in this project that likely matters for this request (current source with line numbers, from the code graph). Start from it instead of searching; Read/Grep only what is missing.",
+                                  "[Bentar Second Brain] Code trong dự án này có lẽ liên quan tới yêu cầu (mã hiện tại kèm số dòng, từ đồ thị code). Bắt đầu từ đây thay vì tìm kiếm; chỉ Read/Grep phần còn thiếu."));
+            else
+            {
+                sb.Append(Header(g));
+                sb.AppendLine(L.T("Task: ", "Nhiệm vụ: ") + task.Trim());
+                sb.AppendLine(L.T("Code below is the exact current source with line numbers — edit from it directly; read_file only for what is marked \"…\".", "Code dưới đây là mã hiện tại kèm số dòng — sửa trực tiếp từ đây; chỉ read_file phần có đánh dấu \"…\"."));
+                sb.AppendLine();
+            }
             var rawCache = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
             Func<CgSym, string[]> rawOf = s => { string[] r; if (!rawCache.TryGetValue(s.File.Path, out r)) rawCache[s.File.Path] = r = RawLines(s.File.Path); return r; };
             var shownRanges = new List<CgSym>();
             var fullShown = new List<CgSym>();   // ký hiệu đã hiện TOÀN BỘ code (hàm con bên trong không cần hiện lại)
             int reserve = Math.Min(maxChars / 4, 2500);   // chừa chỗ cho quan hệ + trí nhớ
-            sb.AppendLine(L.T("=== Most relevant code ===", "=== Code liên quan nhất ==="));
+            if (!light) sb.AppendLine(L.T("=== Most relevant code ===", "=== Code liên quan nhất ==="));
             foreach (var s in seeds)
             {
                 if (fullShown.Any(r => r.File == s.File && r.Start <= s.Start && r.End >= s.End)) continue;
@@ -1169,11 +1181,11 @@ static class CodeGraph
                 sb.AppendLine().AppendLine(L.T("Also possibly relevant: ", "Có thể liên quan thêm: ") + string.Join(", ", more.Select(s => s.Full + " (" + Loc(g, s) + ")")));
         }
         sb.AppendLine();
-        if (sb.Length < maxChars - 400) AppendMemories(sb, task, null);
-        if (sb.Length < maxChars - 400) AppendElsewhere(sb, task, g.Root, 2);
+        if (!light && sb.Length < maxChars - 400) AppendMemories(sb, task, null);
+        if (!light && sb.Length < maxChars - 400) AppendElsewhere(sb, task, g.Root, 2);
         var text = sb.ToString().TrimEnd();
         if (text.Length > maxChars) text = text.Substring(0, maxChars) + "\n…";
-        return Track("context_pack", text, used.Sum(f => f.Size));
+        return Track(light ? "auto_pack" : "context_pack", text, used.Sum(f => f.Size));
     }
 
     // Gọt đuôi tiếng Anh đơn giản: scripts→script, styles→style, enqueued→enqueu, enqueue→enqueu

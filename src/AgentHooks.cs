@@ -139,10 +139,24 @@ static class AgentHooks
                 using (var o = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false))) o.Write(pj);
                 return;
             }
-            if (!EnsureStation(4000)) return;
-            var raw = CallStation("/api/context", new Dictionary<string, object> { { "event", ev }, { "cwd", g("cwd") ?? Environment.CurrentDirectory }, { "prompt", g("prompt") ?? "" } }, agent, 8000);
-            var d = Json.DeserializeObject(raw) as Dictionary<string, object>;
-            object ctx; if (d == null || !d.TryGetValue("context", out ctx) || string.IsNullOrEmpty(ctx as string)) return;
+            // Yêu cầu code trong một dự án: tự đưa sẵn đoạn code liên quan (agent khỏi Grep/Read dò tìm). Chạy ngay trong hook, không cần trạm phát.
+            string pack = "";
+            var prompt = (g("prompt") ?? "").Trim();
+            if (ev != "SessionStart" && prompt.Length >= 15 && L.On("autopack", true))
+                try { pack = CodeGraph.ContextPack(prompt, g("cwd") ?? Environment.CurrentDirectory, 1500, true); } catch { pack = ""; }
+            object ctx = null;
+            if (EnsureStation(4000))
+                try
+                {
+                    var raw = CallStation("/api/context", new Dictionary<string, object> { { "event", ev }, { "cwd", g("cwd") ?? Environment.CurrentDirectory }, { "prompt", prompt } }, agent, 8000);
+                    var d = Json.DeserializeObject(raw) as Dictionary<string, object>;
+                    if (d != null) d.TryGetValue("context", out ctx);
+                }
+                catch { }
+            var all = string.Join("\n\n", new[] { pack, ctx as string }.Where(x => !string.IsNullOrEmpty(x)));
+            if (all.Length > 9500) all = all.Substring(0, 9500) + "…";
+            if (all.Length == 0) return;
+            ctx = all;
             var outJson = Json.Serialize(new Dictionary<string, object> { { "hookSpecificOutput", new Dictionary<string, object> { { "hookEventName", ev }, { "additionalContext", (string)ctx } } } });
             using (var o = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false))) o.Write(outJson);
         }
@@ -358,7 +372,7 @@ static class AgentHooks
             // Claude Code chạy thẳng file .exe (không qua shell) nên không lo dấu cách hay dấu \ trong đường dẫn
             Func<int, Dictionary<string, object>> h = t => new Dictionary<string, object> { { "type", "command" }, { "command", Exe }, { "args", new object[] { "--hook" } }, { "timeout", t } };
             EditHooks(Path.Combine(ClaudeDir, "settings.json"), new Dictionary<string, object> {
-                { "SessionStart", Group("startup|resume|clear|compact", h(15)) }, { "UserPromptSubmit", Group(null, h(10)) }, { "PreToolUse", Group("Read|Grep", h(5)) } }, false);
+                { "SessionStart", Group("startup|resume|clear|compact", h(15)) }, { "UserPromptSubmit", Group(null, h(20)) }, { "PreToolUse", Group("Read|Grep", h(5)) } }, false);
             WriteIfChanged(Path.Combine(ClaudeDir, "skills", "second-brain", "SKILL.md"), SkillText());
             PutBlock(Path.Combine(ClaudeDir, "CLAUDE.md"));
             done.Add(L.T("hooks, skill, CLAUDE.md", "hook, skill, CLAUDE.md"));
