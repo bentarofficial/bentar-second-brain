@@ -73,7 +73,7 @@ class CgGraph
 
 static class CodeGraph
 {
-    const int FormatVersion = 6;   // tăng mỗi khi bộ phân tích đổi để đồ thị cũ được dựng lại
+    const int FormatVersion = 8;   // tăng mỗi khi bộ phân tích đổi để đồ thị cũ được dựng lại
     const long MaxFileSize = 1024 * 1024;
     const int MaxFiles = 25000;
     static readonly string Dir = Path.Combine(Cleaner.DataDir, "graph");
@@ -433,7 +433,13 @@ static class CodeGraph
                     if (words.Count < 300) foreach (Match m in RxWord.Matches(lines[i])) { if (words.Count >= 300) break; foreach (var w in SplitIdent(m.Value)) words.Add(w); }
                 }
             }
-            if (s.Doc != null) foreach (var w in Brain.Tokens(s.Doc)) if (words.Count < 340) words.Add(w);
+            if (s.Doc != null)
+            {
+                foreach (var w in Brain.Tokens(s.Doc)) if (words.Count < 340) words.Add(w);
+                // Chú thích tiếng Việt: thêm từ tiếng Anh tương ứng để nhiệm vụ viết tiếng Anh vẫn khớp
+                var fd = " " + string.Join(" ", Brain.Tokens(s.Doc)) + " ";
+                foreach (var kv in ViEn) if (fd.Contains(" " + kv.Key + " ")) foreach (var w in kv.Value.Split(' ')) if (words.Count < 380) words.Add(w);
+            }
             s.Words = string.Join(" ", words);
         }
         // Lời gọi chỉ thuộc hàm trong cùng: bỏ khỏi hàm/kiểu bao ngoài những lời gọi nằm trong hàm con
@@ -502,7 +508,10 @@ static class CodeGraph
                 // Hàm C/C#: giữa ')' và '{' không được có thứ lạ (tránh nhầm lời gọi trong câu lệnh)
                 if (!IsType(kind) && kind != "impl")
                 {
-                    var between = clean.Substring(pos, open - pos);
+                    // Bỏ phần danh sách tham số (có thể chứa "= null" mặc định) trước khi kiểm tra
+                    int lp = clean.IndexOf('(', pos), rp = -1;
+                    if (lp >= 0 && lp < open) { int dd = 0; for (int p2 = lp; p2 < open; p2++) { if (clean[p2] == '(') dd++; else if (clean[p2] == ')' && --dd == 0) { rp = p2; break; } } }
+                    var between = rp > 0 ? clean.Substring(rp, open - rp) : clean.Substring(pos, open - pos);
                     if (between.Contains("=") && !between.Contains("=>") && lang != "js" && lang != "kt" && lang != "swift" && lang != "rs" && lang != "go" && !between.Contains("=default")) continue;
                 }
                 int d = 0; end = clean.Length - 1;
@@ -1002,6 +1011,9 @@ static class CodeGraph
         var g = Get(RootOf(path));
         var q = new HashSet<string>();
         foreach (var t in Brain.Tokens(task)) { q.Add(t); foreach (var w in SplitIdent(t)) q.Add(w); }
+        // Nhiệm vụ viết tiếng Việt: thêm thuật ngữ tiếng Anh tương ứng (code thường đặt tên bằng tiếng Anh)
+        var folded = " " + string.Join(" ", Brain.Tokens(task)) + " ";
+        foreach (var kv in ViEn) if (folded.Contains(" " + kv.Key + " ")) foreach (var w in kv.Value.Split(' ')) q.Add(w);
         foreach (Match m in Regex.Matches(task, @"[A-Za-z_][A-Za-z0-9_]{2,}")) foreach (var w in SplitIdent(m.Value)) q.Add(w);
         q.RemoveWhere(w => Stop.Contains(w) || w.Length < 2);
         q = new HashSet<string>(q.Select(Stem));
@@ -1024,6 +1036,7 @@ static class CodeGraph
             foreach (var s in all)
             {
                 var ws = new HashSet<string>((s.Words ?? "").Split(' ').Where(x => x.Length > 0).Select(Stem));
+                foreach (var w in PathWords(g, s.File)) ws.Add(w);   // độ hiếm tính cả theo đường dẫn (vd mọi file trong thư mục ai-designer)
                 wordSets[s] = ws;
                 foreach (var w in q) if (ws.Contains(w)) df[w]++;
             }
@@ -1033,7 +1046,7 @@ static class CodeGraph
             foreach (var f in g.Files.Values)
             {
                 double fs; fileScore.TryGetValue(f.Path, out fs);
-                var pathWords = new HashSet<string>(Brain.Tokens(Rel(g, f.Path)).SelectMany(w => SplitIdent(w).Concat(new[] { w })).Select(Stem));
+                var pathWords = PathWords(g, f);
                 double pathHit = q.Where(pathWords.Contains).Sum(w => idf[w]) / idfMax;
                 foreach (var s in f.Syms)
                 {
@@ -1043,12 +1056,14 @@ static class CodeGraph
                     double sc = 0;
                     var nameHitW = q.Where(nameW.Contains).ToList(); var bodyHitW = q.Where(words.Contains).ToList();
                     int nameHit = nameHitW.Count(w => idf[w] > 0.7), bodyHit = bodyHitW.Count(w => idf[w] > 0.7);
+                    if (s.Container != null) { var cw = new HashSet<string>(SplitIdent(s.Container).Select(Stem)); sc += q.Where(w => cw.Contains(w) && !nameW.Contains(w)).Sum(w => idf[w]) / idfMax * 2; }
                     sc += nameHitW.Sum(w => idf[w]) / idfMax * 6 + bodyHitW.Sum(w => idf[w]) / idfMax * 1.6 + pathHit * 1.5 + (fs / maxFile) * 3;
                     if (bodyHit >= 2) sc *= 1 + 0.25 * (bodyHit - 1);   // khớp nhiều từ khác nhau: thưởng
                     if (exact.Contains(s.Name) || exact.Contains(s.Full)) sc += 30;
-                    if (!string.IsNullOrEmpty(s.Doc)) sc += q.Where(w => s.Doc.IndexOf(w, StringComparison.OrdinalIgnoreCase) >= 0).Sum(w => idf[w]) / idfMax * 1.5;
-                    if (IsType(s.Kind) && s.Lines > 150) sc *= 0.5;   // class lớn: ưu tiên method bên trong
-                    if (sc > 0 && (nameHit > 0 || bodyHit >= Math.Min(2, q.Count) || exact.Contains(s.Name))) scored.Add(Tuple.Create(s, sc));
+                    if (!string.IsNullOrEmpty(s.Doc)) { var dw = DocWords(s.Doc); sc += q.Where(dw.Contains).Sum(w => idf[w]) / idfMax * 3; }
+                    // Kiểu (class/struct) hiếm khi là chỗ cần sửa: ưu tiên hàm bên trong, trừ khi nhiệm vụ gọi đúng tên
+                    if (IsType(s.Kind) && !exact.Contains(s.Name)) sc *= 0.35;
+                    if (sc > 0 && (nameHit > 0 || bodyHit >= Math.Min(2, q.Count) || exact.Contains(s.Name) || bodyHitW.Sum(w => idf[w]) >= idfMax * 0.8)) scored.Add(Tuple.Create(s, sc));
                 }
             }
             var ranked = scored.OrderByDescending(t => t.Item2).ToList();
@@ -1059,7 +1074,8 @@ static class CodeGraph
                 return Track("context_pack", sb.ToString().TrimEnd(), 0);
             }
             double top = ranked[0].Item2;
-            var seeds = ranked.Where(t => t.Item2 >= top * 0.35).Take(8).Select(t => t.Item1).ToList();
+            // Chỉ giữ ứng viên đủ mạnh so với ứng viên đầu: ít code thừa hơn
+            var seeds = ranked.Where((t, i) => i < 2 || t.Item2 >= top * 0.45).Take(6).Select(t => t.Item1).ToList();
             var scoreOf = new Dictionary<CgSym, double>();
             foreach (var t in ranked) scoreOf[t.Item1] = t.Item2;
 
@@ -1070,16 +1086,18 @@ static class CodeGraph
             var rawCache = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
             Func<CgSym, string[]> rawOf = s => { string[] r; if (!rawCache.TryGetValue(s.File.Path, out r)) rawCache[s.File.Path] = r = RawLines(s.File.Path); return r; };
             var shownRanges = new List<CgSym>();
+            var fullShown = new List<CgSym>();   // ký hiệu đã hiện TOÀN BỘ code (hàm con bên trong không cần hiện lại)
             int reserve = Math.Min(maxChars / 4, 2500);   // chừa chỗ cho quan hệ + trí nhớ
             sb.AppendLine(L.T("=== Most relevant code ===", "=== Code liên quan nhất ==="));
             foreach (var s in seeds)
             {
-                if (shownRanges.Any(r => r.File == s.File && r.Start <= s.Start && r.End >= s.End)) continue;
+                if (fullShown.Any(r => r.File == s.File && r.Start <= s.Start && r.End >= s.End)) continue;
                 var raw = rawOf(s);
                 int room = maxChars - reserve - sb.Length;
                 if (room < 300) break;
                 sb.AppendLine().AppendLine("## " + s.Kind + " " + s.Full + "  —  " + Loc(g, s) + (string.IsNullOrEmpty(s.Doc) ? "" : "  // " + s.Doc));
-                int maxLines = Math.Max(8, room / 70);
+                int rank = shownRanges.Count;
+                int maxLines = Math.Max(8, Math.Min(room / 70, rank == 0 ? 70 : rank <= 2 ? 30 : 12));
                 if (IsType(s.Kind) && s.Lines > maxLines)
                 {
                     // Kiểu lớn: chữ ký + danh sách thành viên thay vì toàn bộ thân
@@ -1087,7 +1105,7 @@ static class CodeGraph
                     var members = s.File.Syms.Where(m => m != s && m.Start > s.Start && m.End <= s.End).Take(50);
                     sb.AppendLine(L.T("  members: ", "  thành viên: ") + string.Join(", ", members.Select(m => m.Name + " " + m.Start + "-" + m.End)));
                 }
-                else if (s.Lines <= maxLines) AppendCode(sb, raw, s.Start, s.End);
+                else if (s.Lines <= maxLines) { AppendCode(sb, raw, s.Start, s.End); fullShown.Add(s); }
                 else
                 {
                     // Lấy phần đầu và các dòng chứa từ khoá
@@ -1137,7 +1155,7 @@ static class CodeGraph
             if (related.Count > 0)
             {
                 sb.AppendLine().AppendLine(L.T("=== Connected code (graph, 1 hop) ===", "=== Code nối với nó (đồ thị, 1 bước) ==="));
-                foreach (var kv in related.OrderByDescending(kv => relScore[kv.Key]).Take(20))
+                foreach (var kv in related.OrderByDescending(kv => relScore[kv.Key]).Take(10))
                 {
                     if (sb.Length > maxChars - 800) { sb.AppendLine("  …"); break; }
                     var s = kv.Key;
@@ -1164,16 +1182,61 @@ static class CodeGraph
         if (w.Length > 4 && w.EndsWith("ies")) return w.Substring(0, w.Length - 3) + "y";
         if (w.Length > 4 && (w.EndsWith("sses") || w.EndsWith("shes") || w.EndsWith("ches") || w.EndsWith("xes"))) return w.Substring(0, w.Length - 2);
         if (w.Length > 3 && w.EndsWith("s") && !w.EndsWith("ss") && !w.EndsWith("us") && !w.EndsWith("is")) w = w.Substring(0, w.Length - 1);
-        if (w.Length > 5 && w.EndsWith("ing")) return w.Substring(0, w.Length - 3);
+        if (w.Length > 6 && w.EndsWith("ing") && !w.EndsWith("ting")) return w.Substring(0, w.Length - 3);
         if (w.Length > 4 && w.EndsWith("ed")) return w.Substring(0, w.Length - 2);
         if (w.Length > 4 && w.EndsWith("e")) return w.Substring(0, w.Length - 1);
         return w;
     }
 
+    // Từ trong chú thích (đã gọt đuôi), kèm bản dịch tiếng Anh nếu chú thích viết tiếng Việt
+    static HashSet<string> DocWords(string doc)
+    {
+        var toks = Brain.Tokens(doc).ToList();
+        var r = new HashSet<string>(toks.Select(Stem));
+        var fd = " " + string.Join(" ", toks) + " ";
+        foreach (var kv in ViEn) if (fd.Contains(" " + kv.Key + " ")) foreach (var w in kv.Value.Split(' ')) r.Add(Stem(w));
+        return r;
+    }
+
+    static readonly Dictionary<CgFile, HashSet<string>> pathWordCache = new Dictionary<CgFile, HashSet<string>>();
+    static HashSet<string> PathWords(CgGraph g, CgFile f)
+    {
+        lock (pathWordCache)
+        {
+            HashSet<string> r;
+            if (!pathWordCache.TryGetValue(f, out r))
+            {
+                if (pathWordCache.Count > 50000) pathWordCache.Clear();
+                pathWordCache[f] = r = new HashSet<string>(Brain.Tokens(Rel(g, f.Path)).SelectMany(w => SplitIdent(w).Concat(new[] { w })).Select(Stem));
+            }
+            return r;
+        }
+    }
+
+    // Thuật ngữ lập trình tiếng Việt (đã bỏ dấu) -> từ tiếng Anh hay gặp trong tên hàm
+    static readonly Dictionary<string, string> ViEn = new Dictionary<string, string> {
+        { "sao luu", "backup" }, { "khoi phuc", "restore" }, { "ma hoa", "encrypt" }, { "giai ma", "decrypt" }, { "ghi nho", "memory remember" },
+        { "nho lai", "recall" }, { "bang chung", "evidence" }, { "trich", "quote" }, { "tim kiem", "search find" }, { "tim", "search find" },
+        { "cap nhat", "update" }, { "dang nhap", "login auth sign" }, { "dang xuat", "logout" }, { "tai ve", "download" }, { "tai len", "upload" },
+        { "cai dat", "install settings" }, { "go cai", "uninstall" }, { "xoa", "delete remove" }, { "luu", "save" }, { "doc", "read" }, { "ghi", "write" },
+        { "chi muc", "index" }, { "du an", "project" }, { "nguoi dung", "user" }, { "giao dien", "ui view page" }, { "tram phat", "station serve" },
+        { "loi", "error" }, { "cham", "slow" }, { "nhanh", "fast" }, { "mat khau", "password" }, { "khoa", "key lock" }, { "tep", "file" },
+        { "thu muc", "folder dir" }, { "o dia", "drive" }, { "don dep", "clean" }, { "thung rac", "recycle" }, { "lich", "schedule" },
+        { "thong bao", "notify message" }, { "tro chuyen", "chat" }, { "tin nhan", "message" }, { "van phong", "office" }, { "nhan vien", "staff" },
+        { "ket noi", "connect" }, { "ngat", "disconnect" }, { "do tin cay", "trust" }, { "tin cay", "trust" }, { "kiem tra", "check verify test" },
+        { "xac minh", "verify" }, { "phat hanh", "release" }, { "phien ban", "version" }, { "dich", "translate" }, { "ngon ngu", "language" },
+        { "chu de", "theme" }, { "mau", "color" }, { "anh", "image" }, { "hinh", "image" }, { "nut", "button" }, { "trang", "page" },
+        { "danh sach", "list" }, { "bang", "table" }, { "gio hang", "cart" }, { "thanh toan", "payment checkout" }, { "san pham", "product" },
+        { "don hang", "order" }, { "gia", "price" }, { "nhiem vu", "task" }, { "hoan tac", "undo" }, { "phe duyet", "approval approve" },
+        { "duyet", "approve" }, { "quyen", "permission" }, { "do thi", "graph" }, { "ham", "function" }, { "lop", "class" }, { "chu thich", "comment" },
+        { "chuoi", "string" }, { "noi dung", "content" }, { "bo", "strip remove" }, { "dong", "line" }, { "so sanh", "compare" }, { "tao", "create" },
+        { "mo", "open" }, { "dong lai", "close" }, { "chay", "run" }, { "dung", "stop" }, { "khoi dong", "start" }, { "day len", "push" }, { "keo ve", "pull" }, { "phan tich", "parse" }, { "goi", "call" }, { "cau hinh", "config settings" }, { "hook", "hook" } };
+
     static readonly HashSet<string> Stop = new HashSet<string>(StringComparer.OrdinalIgnoreCase) {
+        "in", "on", "of", "to", "at", "by", "an", "it", "its", "is", "be", "or", "as", "over", "before", "after", "then", "than", "so", "if", "all", "any", "some", "my", "our", "your",
         "the", "and", "for", "with", "that", "this", "from", "into", "add", "fix", "make", "use", "when", "how", "what", "where", "why", "should", "would", "could",
         "can", "need", "want", "please", "code", "file", "files", "function", "bug", "error", "new", "all", "not", "but", "are", "was", "has", "have", "does",
-        "va", "cua", "cho", "voi", "khi", "thi", "la", "co", "khong", "duoc", "trong", "mot", "cac", "nhung", "de", "nay", "do", "sua", "them", "lam", "loi",
+        "bi", "bo", "va", "cua", "cho", "voi", "khi", "thi", "la", "co", "khong", "duoc", "trong", "mot", "cac", "nhung", "de", "nay", "do", "sua", "them", "lam", "loi",
         "can", "phai", "nao", "gi", "sao", "tai", "vao", "ra", "len", "xuong", "hay", "nhu", "the", "neu", "da", "dang", "se", "roi" };
 
     // ================= Thống kê tiết kiệm =================
