@@ -193,6 +193,50 @@ static class PowerStation
         catch { }
     }
 
+    // Trạm phát đang chạy bản cũ (vd vừa cập nhật app) hoặc không nhận mã khoá hiện tại: tắt nó rồi mở bản mới.
+    // Trả về true nếu đã khởi động lại.
+    public static bool RestartIfOutdated(string exe)
+    {
+        if (!IsRunning()) return false;
+        string running = null;
+        try
+        {
+            using (var wc = new WebClient())
+            {
+                wc.Headers["Authorization"] = "Bearer " + Token;
+                wc.Headers["X-Client-Name"] = "Bentar Second Brain";
+                var d = Json.DeserializeObject(wc.DownloadString(BaseUrl + "/api/status")) as Dictionary<string, object>;
+                object v; if (d != null && d.TryGetValue("version", out v)) running = v as string;
+            }
+        }
+        catch { }   // 401 (mã khoá lệch) hoặc trạm treo: coi như cần khởi động lại
+        if (running == Updater.Current.ToString(3)) return false;
+        Stop();
+        if (IsRunning()) KillServe();
+        for (int i = 0; i < 20 && IsRunning(); i++) System.Threading.Thread.Sleep(150);
+        Activity.Log("trạm phát", "http", L.T("restarted", "khởi động lại"), (running ?? "?") + " → " + Updater.Current.ToString(3));
+        EnsureRunning(exe);
+        return true;
+    }
+
+    // Dừng mọi tiến trình "… /serve" của app (không đụng tới các tiến trình /mcp của agent)
+    static void KillServe()
+    {
+        try
+        {
+            int self = System.Diagnostics.Process.GetCurrentProcess().Id;
+            using (var q = new System.Management.ManagementObjectSearcher("SELECT ProcessId, CommandLine FROM Win32_Process WHERE Name = 'Bentar Second Brain.exe'"))
+                foreach (System.Management.ManagementObject o in q.Get())
+                {
+                    var cmd = Convert.ToString(o["CommandLine"]) ?? "";
+                    int pid = Convert.ToInt32(o["ProcessId"]);
+                    if (pid == self || cmd.IndexOf("/serve", StringComparison.OrdinalIgnoreCase) < 0) continue;
+                    try { System.Diagnostics.Process.GetProcessById(pid).Kill(); } catch { }
+                }
+        }
+        catch { }
+    }
+
     // Tắt trạm phát đang chạy (gọi vào chính nó, kèm mã khoá)
     public static void Stop()
     {

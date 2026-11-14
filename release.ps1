@@ -23,7 +23,7 @@ New-Item -ItemType Directory -Force $out | Out-Null
 $exe = Join-Path $out "$name.exe"
 & C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /nologo /target:winexe /codepage:65001 /optimize /win32icon:src\app.ico "/out:$exe" `
     /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Core.dll /r:Microsoft.VisualBasic.dll /r:System.Web.Extensions.dll `
-    /r:System.IO.Compression.dll /r:System.Security.dll src\*.cs
+    /r:System.IO.Compression.dll /r:System.Security.dll /r:System.Management.dll src\*.cs
 if ($LASTEXITCODE -ne 0) { throw "Biên dịch lỗi." }
 
 $zip = Join-Path $out ("Bentar-Second-Brain-v$Version.zip")

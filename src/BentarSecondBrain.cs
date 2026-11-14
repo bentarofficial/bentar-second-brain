@@ -1038,7 +1038,12 @@ partial class MainForm : Form
         if (Installer.OfferOnStart()) return;   // đã chuyển sang mở bản vừa cài
         Installer.RefreshRegistration();
         Installer.CleanupOld();
-        if (L.On("station", true)) PowerStation.EnsureRunning(Installer.IsInstalled ? Installer.Exe : Application.ExecutablePath);
+        if (L.On("station", true))
+        {
+            // Sau khi cập nhật, trạm phát cũ vẫn có thể đang chạy: thay bằng bản mới để agent và lệnh sb có công cụ mới
+            string stationExe = Installer.IsInstalled ? Installer.Exe : Application.ExecutablePath;
+            Task.Run(() => { try { if (!PowerStation.RestartIfOutdated(stationExe)) PowerStation.EnsureRunning(stationExe); } catch { } });
+        }
         Application.Run(new MainForm());
     }
 }
