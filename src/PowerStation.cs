@@ -48,7 +48,7 @@ static class Activity
     // Tóm tắt tham số để nhật ký dễ đọc (không ghi nội dung dài)
     public static string Summary(string tool, Dictionary<string, object> a)
     {
-        foreach (var k in new[] { "query", "path", "title", "text", "id", "source", "filter" })
+        foreach (var k in new[] { "task", "name", "query", "path", "title", "text", "id", "source", "filter" })
         {
             object v;
             if (a != null && a.TryGetValue(k, out v) && v != null)

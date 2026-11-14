@@ -274,6 +274,7 @@ static class Brain
             Progress = "";
         }
         finally { Building = false; }
+        Task.Run(() => CodeGraph.Prewarm(25));
     }
 
     static void Walk(DirectoryInfo dir, int depth, Dictionary<string, BrainFile> old, List<string> oldTerms, Func<string, int> idOf,
@@ -531,18 +532,8 @@ static class AgentLinks
     public static List<string> ConnectAll(bool onlyExisting)
     {
         try { AgentHooks.EnsureShims(); } catch { }
+        // Chỉ còn một nhân sự là Claude Code: các coding agent khác không còn được kết nối
         var r = new List<string> { Try("Claude Code", () => WithExtras("Claude Code", ClaudeCode(onlyExisting))) };
-        bool desktopOpen = ClaudeDesktopRunning();
-        foreach (var t in JsonTargets())
-        {
-            var f = t.Item2;
-            // Claude Desktop đang mở sẽ ghi đè file cấu hình của nó và làm mất mục vừa thêm
-            if (desktopOpen && t.Item1.StartsWith("Claude Desktop") && Directory.Exists(Path.GetDirectoryName(f)))
-            { if (!onlyExisting) r.Add(t.Item1 + L.T(": running – fully quit Claude Desktop (including the tray icon) and connect again", ": đang mở – thoát hẳn Claude Desktop (cả biểu tượng ở khay hệ thống) rồi bấm kết nối lại")); continue; }
-            var name = t.Item1;
-            r.Add(Try(name, () => WithExtras(name, JsonConnect(f, onlyExisting))));
-        }
-        r.Add(Try("Codex", () => WithExtras("Codex", CodexConnect(onlyExisting))));
         return r.Where(x => x != null).ToList();
     }
 
@@ -573,6 +564,13 @@ static class AgentLinks
         var r = new List<Agent>();
         bool cc = Cmd("where claude").Item1 == 0;
         r.Add(new Agent { Name = "Claude Code", Installed = cc, Connected = cc && Cmd("claude mcp get " + ServerName).Item1 == 0 });
+        return r;
+    }
+
+    // Các agent trước đây từng hỗ trợ (giờ chỉ dùng để gỡ Second Brain khỏi chúng)
+    static List<Agent> Others()
+    {
+        var r = new List<Agent>();
         foreach (var t in JsonTargets())
         {
             bool inst = Directory.Exists(Path.GetDirectoryName(t.Item2));
@@ -585,6 +583,21 @@ static class AgentLinks
         try { cxc = File.Exists(CodexFile) && CodexBlock.IsMatch(File.ReadAllText(CodexFile, Encoding.UTF8)); } catch { }
         r.Add(new Agent { Name = "Codex", Installed = cx, Connected = cxc });
         return r;
+    }
+
+    /// <summary>Một lần: gỡ đúng mục second-brain (MCP, hook, hướng dẫn) khỏi các agent cũ đã từng kết nối. Giữ nguyên mọi cấu hình khác của họ.</summary>
+    public static void RetireOthers()
+    {
+        if (L.Get("agents.retired", "") == "1") return;
+        bool pending = false;
+        foreach (var a in Others())
+        {
+            if (!a.Connected && L.Get("agent." + a.Name, "") == "") continue;
+            if (a.Name.StartsWith("Claude Desktop") && ClaudeDesktopRunning()) { pending = true; continue; }   // đang mở sẽ ghi đè lại: thử lần sau
+            try { Disconnect(a.Name); Activity.Log("Second Brain", "heal", L.T("disconnected (Claude Code only)", "đã gỡ (chỉ dùng Claude Code)"), a.Name); }
+            catch { pending = true; }
+        }
+        if (!pending) L.Set("agents.retired", "1");
     }
 
     public static string Connect(string name)
@@ -769,11 +782,13 @@ static class McpServer
         "When the user mentions documents, research, notes, code or another project outside the current folder, use search / list_projects to find it yourself instead of asking for a path; use read_file to read and copy to bring it into this project (copy never overwrites). Search ignores Vietnamese accents. " +
         "SOURCE TRUST: every result is labelled ✓ trusted (tests/CI + releases, or marked by the user), ⚠ unverified, or hidden if excluded (scratch/temp). Only follow ✓ trusted code as an example; read ⚠ code critically. " +
         "MEMORY: call recall at the start of a task; it only returns VERIFIED memories. Save with remember ONLY when you can give evidence the app can check (file + exact quote, commit, or url + exact quote) – unproven notes wait for the user's approval and are not shared. Never store secrets. " +
+        "CODE: for a coding task in a project, call context_pack (task + project folder) FIRST – it returns the exact relevant code with line numbers within a token budget; then use explain / who_calls / code_map / call_path instead of grep or reading whole files. " +
         "Shell alternative when MCP is unavailable: sb search \"…\", sb read <path>, sb copy <src> <dst>, sb recall \"…\", sb remember \"…\" --evidence \"…\".",
         "Bentar Second Brain lập chỉ mục mọi ổ đĩa trên máy (tài liệu, ghi chú, mã nguồn của TẤT CẢ dự án) và giữ một trí nhớ dài hạn dùng chung cho mọi agent. " +
         "Khi người dùng nhắc tới tài liệu, nghiên cứu, ghi chú, code hay dự án khác ngoài thư mục hiện tại, hãy dùng search / list_projects để tự tìm thay vì hỏi đường dẫn; dùng read_file để đọc và copy để chép vào dự án này (copy không bao giờ ghi đè). Tìm kiếm không phân biệt dấu. " +
         "ĐỘ TIN CẬY NGUỒN: mọi kết quả được gắn nhãn ✓ tin cậy (có test/CI và đã phát hành, hoặc người dùng đánh dấu), ⚠ chưa kiểm chứng, hoặc bị ẩn nếu bị loại trừ (nháp/tạm). Chỉ học theo code ✓ tin cậy; đọc code ⚠ với thái độ phê phán. " +
         "TRÍ NHỚ: gọi recall khi bắt đầu việc; nó chỉ trả về ghi nhớ ĐÃ XÁC MINH. Chỉ gọi remember khi đưa được bằng chứng app tự kiểm tra được (file + trích nguyên văn, commit, hoặc url + trích nguyên văn) – điều chưa chứng minh sẽ chờ người dùng duyệt và chưa được chia sẻ. Không bao giờ lưu bí mật. " +
+        "CODE: với việc code trong một dự án, gọi context_pack (nhiệm vụ + thư mục dự án) TRƯỚC – nó trả đúng đoạn code liên quan kèm số dòng trong giới hạn token; sau đó dùng explain / who_calls / code_map / call_path thay cho grep hay đọc nguyên file. " +
         "Khi không có MCP, dùng dòng lệnh: sb search \"…\", sb read <đường dẫn>, sb copy <nguồn> <đích>, sb recall \"…\", sb remember \"…\" --evidence \"…\"."); } }
 
     public static void Run()
@@ -932,6 +947,29 @@ static class McpServer
                     { "a", Prop("string", L.T("Memory id (n12), file path or project folder", "Mã ghi nhớ (n12), đường dẫn file hoặc thư mục dự án")) },
                     { "b", Prop("string", L.T("Second item, same format", "Ý thứ hai, cùng dạng")) },
                     { "why", Prop("string", L.T("Why they are related (optional)", "Vì sao liên quan (tuỳ chọn)")) } }, "a", "b"),
+            Tool("context_pack", L.T("BEST FIRST STEP for any coding task in a project: describe the task and get, within a token budget, the exact relevant code (current source with line numbers), the code connected to it through the call graph, verified memories and ✓ trusted examples from other projects. Usually replaces several search/grep/read calls.", "BƯỚC ĐẦU TỐT NHẤT cho mọi việc code trong một dự án: mô tả nhiệm vụ và nhận, trong giới hạn token, đúng đoạn code liên quan (mã hiện tại kèm số dòng), code nối với nó qua đồ thị lời gọi, ghi nhớ đã xác minh và ví dụ ✓ tin cậy ở dự án khác. Thường thay được nhiều lần search/grep/read."),
+                new Dictionary<string, object> {
+                    { "task", Prop("string", L.T("What you need to do, e.g. 'fix crash when the index file is missing' (identifiers like ReadDocx help)", "Việc cần làm, ví dụ 'sửa lỗi crash khi thiếu file chỉ mục' (tên hàm như ReadDocx giúp chính xác hơn)")) },
+                    { "path", Prop("string", L.T("Project folder (your current working directory) or a file in it", "Thư mục dự án (thư mục đang làm việc) hoặc một file trong đó")) },
+                    { "budget", Prop("integer", L.T("Maximum tokens to return (default 6000)", "Số token tối đa trả về (mặc định 6000)")) } }, "task", "path"),
+            Tool("code_map", L.T("Outline of a code file or project folder: functions/classes with line ranges, inheritance, number of callers, central symbols. Use instead of reading a whole file, then read_file only the lines you need.", "Dàn ý một file code hoặc thư mục dự án: hàm/class kèm khoảng dòng, kế thừa, số nơi gọi, ký hiệu trung tâm. Dùng thay cho đọc nguyên file, rồi read_file đúng đoạn cần."),
+                new Dictionary<string, object> {
+                    { "path", Prop("string", L.T("File or folder", "File hoặc thư mục")) },
+                    { "budget", Prop("integer", L.T("Maximum tokens (default 4000)", "Số token tối đa (mặc định 4000)")) } }, "path"),
+            Tool("explain", L.T("Explain a symbol (function/class/method, e.g. 'Brain.Search'): location, doc, code, what it calls and who calls it (EXTRACTED = unique match, INFERRED = several same-named candidates), related verified memories and ✓ examples elsewhere.", "Giải thích một ký hiệu (hàm/class/method, ví dụ 'Brain.Search'): vị trí, chú thích, code, nó gọi gì và ai gọi nó (EXTRACTED = khớp duy nhất, INFERRED = nhiều ứng viên trùng tên), ghi nhớ đã xác minh và ví dụ ✓ ở nơi khác."),
+                new Dictionary<string, object> {
+                    { "name", Prop("string", L.T("Symbol name, optionally Class.Method", "Tên ký hiệu, có thể dạng Class.Method")) },
+                    { "path", Prop("string", L.T("Project folder or a file in it", "Thư mục dự án hoặc một file trong đó")) } }, "name", "path"),
+            Tool("who_calls", L.T("Every place that calls a function/constructor in the project, with file:line and the calling line. Use before changing a signature instead of grep.", "Mọi nơi gọi một hàm/constructor trong dự án, kèm file:dòng và dòng gọi. Dùng trước khi đổi chữ ký hàm thay cho grep."),
+                new Dictionary<string, object> {
+                    { "name", Prop("string", L.T("Symbol name", "Tên ký hiệu")) },
+                    { "path", Prop("string", L.T("Project folder or a file in it", "Thư mục dự án hoặc một file trong đó")) },
+                    { "limit", Prop("integer", L.T("Maximum call sites (default 60)", "Số nơi gọi tối đa (mặc định 60)")) } }, "name", "path"),
+            Tool("call_path", L.T("Shortest call chain from one symbol to another (how does A reach B?).", "Chuỗi lời gọi ngắn nhất từ ký hiệu này tới ký hiệu kia (A đi tới B thế nào?)."),
+                new Dictionary<string, object> {
+                    { "from", Prop("string", L.T("Starting symbol", "Ký hiệu bắt đầu")) },
+                    { "to", Prop("string", L.T("Target symbol", "Ký hiệu đích")) },
+                    { "path", Prop("string", L.T("Project folder or a file in it", "Thư mục dự án hoặc một file trong đó")) } }, "from", "to", "path"),
             Tool("index_status", L.T("Index status: file count, project count, last update, connected drives. Set refresh=true to re-index now (in the background).", "Trạng thái chỉ mục: số file, số dự án, lần cập nhật cuối, các ổ đang cắm. Đặt refresh=true để cập nhật lại ngay (chạy ngầm)."),
                 new Dictionary<string, object> { { "refresh", Prop("boolean", L.T("true = re-index now", "true = cập nhật chỉ mục ngay")) } }),
         };
@@ -1027,6 +1065,8 @@ static class McpServer
                     sb.AppendLine().AppendLine("===== " + n + (lines.Length > 200 ? " (200/" + lines.Length + L.T(" first lines)", " dòng đầu)") : "") + " =====");
                     foreach (var l in lines.Take(200)) sb.AppendLine(l.TrimEnd('\r'));
                 }
+                var cg = CodeGraph.OverviewSection(di.FullName);
+                if (cg.Length > 0) sb.AppendLine().AppendLine(cg);
                 var memo = Memory.ForProject(di.FullName);
                 if (memo.Length > 0) sb.AppendLine().AppendLine(L.T("===== Second Brain memory =====", "===== Trí nhớ Second Brain =====")).AppendLine(memo);
                 Memory.Experience(di.FullName);
@@ -1085,6 +1125,11 @@ static class McpServer
                 Memory.Copied(S(a, "source"), S(a, "destination"));
                 return res;
             }
+            case "context_pack": return CodeGraph.ContextPack(S(a, "task"), S(a, "path"), I(a, "budget", 6000));
+            case "code_map": return CodeGraph.CodeMap(S(a, "path"), I(a, "budget", 4000));
+            case "explain": return CodeGraph.Explain(S(a, "name"), S(a, "path"));
+            case "who_calls": return CodeGraph.WhoCalls(S(a, "name"), S(a, "path"), Math.Max(1, Math.Min(500, I(a, "limit", 60))));
+            case "call_path": return CodeGraph.CallPath(S(a, "from"), S(a, "to"), S(a, "path"));
             case "index_status":
             {
                 Brain.EnsureLoaded();
@@ -1096,6 +1141,7 @@ static class McpServer
                 sb.AppendLine(L.T("Memory: ", "Trí nhớ: ") + mc.Item1 + L.T(" memories, ", " ghi nhớ, ") + mc.Item2 + L.T(" links", " liên kết"));
                 sb.AppendLine(L.T("Last updated: ", "Cập nhật lần cuối: ") + (Brain.BuiltAt == DateTime.MinValue ? L.T("never", "chưa có") : Brain.BuiltAt.ToString("dd/MM/yyyy HH:mm")));
                 sb.AppendLine(L.T("Updating: ", "Đang cập nhật: ") + (Brain.Building ? L.T("yes — ", "có — ") + Brain.Progress : L.T("no", "không")));
+                sb.AppendLine(CodeGraph.SavingsLine());
                 sb.Append(L.T("Connected drives: ", "Ổ đang cắm: ") + string.Join(", ", Brain.Drives().Select(d => d.Name.TrimEnd('\\'))));
                 return sb.ToString();
             }

@@ -130,6 +130,15 @@ static class AgentHooks
             Func<string, string> g = k => { object v; return p.TryGetValue(k, out v) ? v as string : null; };
             string ev = g("hook_event_name") ?? "UserPromptSubmit";
             string agent = AgentFrom(p);
+            if (ev == "PreToolUse")
+            {
+                object ti; p.TryGetValue("tool_input", out ti);
+                var tip = CodeGraph.Nudge(g("tool_name"), ti as Dictionary<string, object>, g("session_id"), g("cwd"));
+                if (tip == null) return;
+                var pj = Json.Serialize(new Dictionary<string, object> { { "hookSpecificOutput", new Dictionary<string, object> { { "hookEventName", ev }, { "additionalContext", tip } } } });
+                using (var o = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false))) o.Write(pj);
+                return;
+            }
             if (!EnsureStation(4000)) return;
             var raw = CallStation("/api/context", new Dictionary<string, object> { { "event", ev }, { "cwd", g("cwd") ?? Environment.CurrentDirectory }, { "prompt", g("prompt") ?? "" } }, agent, 8000);
             var d = Json.DeserializeObject(raw) as Dictionary<string, object>;
@@ -148,7 +157,8 @@ static class AgentHooks
     static readonly Dictionary<string, string> Aliases = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) {
         { "search", "search" }, { "find", "search" }, { "recall", "recall" }, { "remember", "remember" }, { "read", "read_file" }, { "cat", "read_file" },
         { "ls", "list_dir" }, { "dir", "list_dir" }, { "projects", "list_projects" }, { "overview", "project_overview" }, { "copy", "copy" }, { "cp", "copy" },
-        { "status", "index_status" }, { "revise", "revise_memory" }, { "link", "connect" } };
+        { "status", "index_status" }, { "revise", "revise_memory" }, { "link", "connect" },
+        { "pack", "context_pack" }, { "context", "context_pack" }, { "map", "code_map" }, { "explain", "explain" }, { "callers", "who_calls" }, { "who-calls", "who_calls" }, { "path", "call_path" } };
     static readonly Dictionary<string, string> OptAlias = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) {
         { "from", "start_line" }, { "lines", "max_lines" }, { "all", "include_unverified" }, { "excluded", "include_excluded" }, { "name-only", "name_only" } };
     static readonly HashSet<string> Flags = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "name_only", "include_unverified", "include_excluded", "refresh", "outdated" };
@@ -185,6 +195,10 @@ static class AgentHooks
                 case "copy": if (pos.Count > 0) a["source"] = pos[0]; if (pos.Count > 1) a["destination"] = pos[1]; break;
                 case "revise_memory": if (pos.Count > 0) a["id"] = pos[0]; if (pos.Count > 1) a["text"] = string.Join(" ", pos.Skip(1)); break;
                 case "connect": if (pos.Count > 0) a["a"] = pos[0]; if (pos.Count > 1) a["b"] = pos[1]; break;
+                case "context_pack": joinTo("task"); if (!a.ContainsKey("path")) a["path"] = Environment.CurrentDirectory; break;
+                case "code_map": a["path"] = pos.Count > 0 ? pos[0] : Environment.CurrentDirectory; break;
+                case "explain": case "who_calls": if (pos.Count > 0) a["name"] = pos[0]; if (!a.ContainsKey("path")) a["path"] = pos.Count > 1 ? pos[1] : Environment.CurrentDirectory; break;
+                case "call_path": if (pos.Count > 0) a["from"] = pos[0]; if (pos.Count > 1) a["to"] = pos[1]; if (!a.ContainsKey("path")) a["path"] = Environment.CurrentDirectory; break;
             }
             foreach (var k in new[] { "path", "source", "destination" })
             {
@@ -216,6 +230,8 @@ static class AgentHooks
             "  sb projects [filter]\n" +
             "  sb overview <project folder>\n" +
             "  sb copy <source> <destination> (never overwrites)\n" +
+            "  sb pack <task> [--path <project>] [--budget 6000]   (exact code for a task; default path = current folder)\n" +
+            "  sb map [file|folder]  ·  sb explain <Name>  ·  sb callers <Name>  ·  sb path <From> <To>\n" +
             "  sb recall [topic] [--all]      (verified memories; --all also shows unverified)\n" +
             "  sb remember <text> --evidence 'file \"<path>\" \"<exact quote>\"' [--kind lesson|decision|fact|todo|note] [--source <path>]\n" +
             "       evidence lines: file \"<path>\" \"<quote>\" | commit \"<repo>\" <hash> | url https://… \"<quote>\" | user \"<what the user said>\"\n" +
@@ -233,6 +249,7 @@ static class AgentHooks
             "- This PC has a shared Second Brain: an index of every project and document on all drives, plus a long-term memory shared by all agents.\n" +
             "- Need a document, code or another project outside the current folder? Find it yourself – MCP tool `search` (server `second-brain`) or shell `sb search \"…\"` – read it (`read_file` / `sb read <path>`), and bring it in with `copy` / `sb copy <src> <dst>` (never overwrites). Don't ask the user for paths.\n" +
             "- Results are labelled ✓ trusted (tests/CI + releases, or marked by the user) or ⚠ unverified. Only follow ✓ trusted code as an example; read ⚠ code critically.\n" +
+            "- Coding in a project? Call `context_pack` (task + project folder) FIRST – exact relevant code with line numbers within a token budget (shell: `sb pack \"<task>\"`). Then `explain <symbol>`, `who_calls <symbol>`, `code_map <file|dir>`, `call_path A B` instead of grep or reading whole files; read_file only the line ranges they point to.\n" +
             "- At the start of a task, `recall` (or `sb recall \"<topic>\"`) – it returns verified memories only.\n" +
             "- Save knowledge with `remember` / `sb remember` ONLY with evidence the app can check: file \"<path>\" \"<exact quote>\", commit \"<repo>\" <hash>, or url https://… \"<exact quote>\". Unproven notes wait for the user's approval. Never store secrets.\n" +
             "- If `sb` is not on PATH, use: \"" + Fwd(Path.Combine(BinDir, "sb.cmd")) + "\"\n" +
@@ -341,7 +358,7 @@ static class AgentHooks
             // Claude Code chạy thẳng file .exe (không qua shell) nên không lo dấu cách hay dấu \ trong đường dẫn
             Func<int, Dictionary<string, object>> h = t => new Dictionary<string, object> { { "type", "command" }, { "command", Exe }, { "args", new object[] { "--hook" } }, { "timeout", t } };
             EditHooks(Path.Combine(ClaudeDir, "settings.json"), new Dictionary<string, object> {
-                { "SessionStart", Group("startup|resume|clear|compact", h(15)) }, { "UserPromptSubmit", Group(null, h(10)) } }, false);
+                { "SessionStart", Group("startup|resume|clear|compact", h(15)) }, { "UserPromptSubmit", Group(null, h(10)) }, { "PreToolUse", Group("Read|Grep", h(5)) } }, false);
             WriteIfChanged(Path.Combine(ClaudeDir, "skills", "second-brain", "SKILL.md"), SkillText());
             PutBlock(Path.Combine(ClaudeDir, "CLAUDE.md"));
             done.Add(L.T("hooks, skill, CLAUDE.md", "hook, skill, CLAUDE.md"));
@@ -433,6 +450,7 @@ static class AgentHooks
     // ================= Tự nối lại (trạm phát gọi định kỳ) =================
     public static void Heal()
     {
+        try { AgentLinks.RetireOthers(); } catch { }
         foreach (var a in AgentLinks.List())
         {
             var key = "agent." + a.Name;

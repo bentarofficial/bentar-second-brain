@@ -35,6 +35,22 @@ Nothing to install: it uses the C# compiler that ships with Windows (.NET Framew
 & C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /nologo /target:winexe /codepage:65001 /optimize /win32icon:src\app.ico "/out:Bentar Second Brain.exe" /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Core.dll /r:Microsoft.VisualBasic.dll /r:System.Web.Extensions.dll /r:System.IO.Compression.dll /r:System.Security.dll src\*.cs
 ```
 
+## Roadmap
+
+### Office: make the agent workspace feel like a real, lived-in office
+
+The Office page already connects its staff animations to real agent activity. Keep that behavior and the existing isometric layout, while making the room feel more like a cohesive, welcoming modern workplace and less like a basic diagram. Aim for a polished, stylized 2.5D illustration that fits the app; do not pursue photorealism or add decorative clutter.
+
+Implementation direction for Claude Code:
+
+1. **Improve the room shell and depth.** Give the floor and walls clearer materials and perspective, with a consistent baseboard, window or glass wall, soft daylight, contact shadows, and subtle ambient depth. Ensure the room remains legible at the minimum supported window size and when the staff sidebar is resized.
+2. **Add a small set of recognizable workplace zones.** Establish a command office, shared agent desk area, knowledge/file station, and a compact coffee/plant area. Use a few purposeful props such as task board, shelves, desk lamps, monitors, chairs, cables, and personal desk items; preserve clear paths for animated staff and report/file delivery.
+3. **Give workstations and staff more visual character.** Refine desk, chair, monitor and person silhouettes, add restrained role-specific desk details, and make working, available, idle, and away states understandable through posture, screen glow, and small status cues. Retain names and click-to-manage behavior.
+4. **Refine lighting and motion.** Use a consistent palette and light direction, gentle screen/desk lighting, and subtle time-of-day variation. Keep movement tied to actual activity; make idle coffee walks occasional and unobtrusive. Reduce or restyle flying papers and speech bubbles if they make the scene feel like a cartoon game, while retaining useful event feedback.
+5. **Check polish and usability.** Verify that labels, hit targets, selection/hover feedback, animation and all office zones remain clear at small and large window sizes, in dark and light themes, and with Vietnamese and English text. Keep drawing efficient and avoid allocating disposable GDI objects every frame where they can be reused.
+
+Acceptance criteria: the first impression is a coherent modern office with visible depth and distinct work zones; the scene is not crowded; agent presence and real work activity remain easy to read; existing selection, management actions, and activity-driven animations continue to work; the layout scales without clipping or overlapping labels. Keep the change focused on `src/Office.cs` and, only if needed, the Office page layout in `src/OfficePage.cs`.
+
 ## Install and uninstall
 
 The first time you open the `.exe`, the app asks whether to install it (no admin rights needed). It copies itself to `%LOCALAPPDATA%\Programs\Bentar Second Brain`, creates Start Menu and Desktop shortcuts, and appears in **Settings → Apps**. Scheduled cleanup and all agents use this installed copy.
@@ -129,6 +145,25 @@ The **Brain** tab (opened first) draws the actual neurons and synapses in memory
 Second Brain **never edits or deletes files**. `copy` only creates a new copy and refuses to overwrite. Skipped when indexing: system folders, AppData, `node_modules`, `.git`, virtual environments, and the contents of secret files (`.env`, keys, credentials).
 
 The index refreshes in the background when an agent queries it (if older than 30 minutes), or click **Update index**, or run `BentarSecondBrain.exe /index`.
+
+## Code graph: fewer tokens for coding agents
+
+Second Brain keeps a code graph for each project, written in C# with nothing extra to install. The ideas come from Graphify, but Graphify itself is not bundled.
+
+- **Symbol map:** functions, classes and methods with line ranges, signatures and doc comments. Supported languages: C#, JS/TS, Python, PHP, Go, Java/Kotlin, Rust, C/C++, Ruby, Lua and PowerShell.
+- **Relations:** calls, inheritance and imports. Each call is labelled **EXTRACTED** when it resolves to a single definition (using `Class.Method` qualifiers, `new X(` and same-class rules) or **INFERRED** when several same-named candidates remain.
+- **Always fresh:** on every query, only changed files are parsed again. Graphs are saved in `%LOCALAPPDATA%\BentarSecondBrain\graph`. Recently used projects are pre-built in the background after indexing.
+
+| MCP tool | Shell | What it gives |
+|---|---|---|
+| `context_pack` | `sb pack "task"` | The exact relevant code, with line numbers, for a task within a token budget. It also includes code one hop away in the call graph, verified memories and ✓ trusted examples from other projects. |
+| `code_map` | `sb map <file\|dir>` | An outline with line ranges, caller counts and central symbols. |
+| `explain` | `sb explain Name` | A symbol's code, what it calls, who calls it and related memories. |
+| `who_calls` | `sb callers Name` | Every call site, with file:line and the calling line. |
+| `call_path` | `sb path A B` | The shortest call chain from A to B. |
+
+- **Agent nudges:** Claude Code gets a non-blocking `PreToolUse` hook on `Read|Grep`. It suggests these tools once per session when an agent reads a large code file whole or greps for a symbol name.
+- **Savings in `index_status`:** each response is compared with the size of the whole files an agent would otherwise have read. This is an upper-bound estimate, not a measured benchmark.
 
 ## Power station: one brain, every agent plugs in
 

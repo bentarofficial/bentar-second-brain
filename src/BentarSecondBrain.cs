@@ -13,7 +13,7 @@ using System.Windows.Forms;
 
 [assembly: System.Reflection.AssemblyTitle("Bentar Second Brain")]
 [assembly: System.Reflection.AssemblyProduct("Bentar Second Brain")]
-[assembly: System.Reflection.AssemblyVersion("2.10.2.0")]
+[assembly: System.Reflection.AssemblyVersion("2.11.0.0")]
 
 // Cập nhật từ GitHub Releases: so sánh tag (vd "v2.1.0") với phiên bản app, tải file .exe mới rồi tự thay thế
 static class Updater
@@ -675,7 +675,7 @@ partial class MainForm : Form
         try { if (!Installer.IsInstalled) Installer.Install(); }
         catch (Exception ex) { MessageBox.Show(L.T("Could not install the app to ", "Không cài được app vào ") + Installer.Dir + ":\n" + ex.Message, Text); return; }
         var lines = await Task.Run(() => AgentLinks.ConnectAll(false));
-        MessageBox.Show(lines.Count == 0 ? L.T("No agents found on this PC (Claude Code, Claude Desktop, Cursor, Windsurf, Codex, Gemini CLI).", "Không tìm thấy agent nào trên máy (Claude Code, Claude Desktop, Cursor, Windsurf, Codex, Gemini CLI).") :
+        MessageBox.Show(lines.Count == 0 ? L.T("Claude Code is not installed on this PC (npm i -g @anthropic-ai/claude-code).", "Chưa cài Claude Code trên máy (npm i -g @anthropic-ai/claude-code).") :
             L.T("Connecting Second Brain:\n\n", "Kết nối Second Brain:\n\n") + string.Join("\n", lines) + L.T("\n\nOpen a NEW agent session to start using it.", "\n\nMở phiên agent MỚI là dùng được."), Text);
     }
 
