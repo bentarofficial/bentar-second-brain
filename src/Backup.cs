@@ -225,7 +225,7 @@ static class Backup
         if (view.Item1 == 0)
         {
             if (view.Item2.IndexOf("PRIVATE", StringComparison.OrdinalIgnoreCase) < 0) throw new InvalidOperationException(L.T("Step 5: repo ", "Bước 5: repo ") + full + L.T(" exists but is NOT private – it cannot be used for brain backups.", " đã có nhưng KHÔNG riêng tư – không dùng để sao lưu bộ não."));
-            if (HasBrain(full)) throw new InvalidOperationException(L.T("Step 5: repo ", "Bước 5: repo ") + full + L.T(" already has a brain. Use \"Restore\".", " đã có bộ não. Hãy dùng \"Khôi phục\"."));
+            if (HasBrain(full)) throw new InvalidOperationException(L.T("Step 5: repo ", "Bước 5: repo ") + full + L.T(" already has a brain. Choose \"Use an existing repo\" to keep backing up to it, or \"Restore\".", " đã có bộ não. Chọn \"Dùng repo có sẵn\" để sao lưu tiếp vào đó, hoặc \"Khôi phục\"."));
             say(L.T("5. Repo already exists (private, empty) – reusing it.", "5. Repo đã có sẵn (riêng tư, còn trống) – dùng lại."));
         }
         else
@@ -410,8 +410,27 @@ static class Backup
             // Repo đã có bản sao lưu KHÔNG mã hoá và lần này cũng không mã hoá: sao lưu tiếp lên trên (bản cũ vẫn trong lịch sử git).
             // Bản có mã hoá thì phải Khôi phục, vì khoá phải khớp.
             bool continuePlain = plain && File.Exists(Path.Combine(RepoDir, PlainName)) && !File.Exists(Path.Combine(RepoDir, KeyName)) && !File.Exists(Path.Combine(RepoDir, DataName));
-            if (!continuePlain && (File.Exists(Path.Combine(RepoDir, KeyName)) || File.Exists(Path.Combine(RepoDir, DataName)) || File.Exists(Path.Combine(RepoDir, PlainName))))
-                throw new InvalidOperationException(L.T("This repo already has a backup. Use \"Restore\" instead of setting up again.", "Repo này đã có bản sao lưu. Hãy dùng \"Khôi phục\" thay vì thiết lập mới."));
+            bool hasKey = File.Exists(Path.Combine(RepoDir, KeyName));
+            if (!plain && hasKey)
+            {
+                // Repo đã có bản sao lưu MÃ HOÁ: đúng mật khẩu thì nối vào và sao lưu tiếp (khoá cũ giữ nguyên, bản cũ vẫn trong lịch sử git)
+                string old;
+                try { old = Encoding.UTF8.GetString(Decrypt(File.ReadAllBytes(Path.Combine(RepoDir, KeyName)), password)); }
+                catch { DeleteTree(RepoDir); throw new UnauthorizedAccessException(L.T("This repo already has an encrypted backup and the password does not match it.", "Repo này đã có bản sao lưu mã hoá và mật khẩu không khớp.")); }
+                StoreLocalCode(old);
+                var sc = Status(); sc.Repo = repoUrl; sc.LastHash = null; sc.LastError = null; sc.Plain = false; Save(sc);
+                Run(true);
+                var ac = Status();
+                if (!string.IsNullOrEmpty(ac.LastError)) throw new InvalidOperationException(ac.LastError);
+                return null;
+            }
+            if (!continuePlain && (hasKey || File.Exists(Path.Combine(RepoDir, DataName)) || File.Exists(Path.Combine(RepoDir, PlainName))))
+            {
+                DeleteTree(RepoDir);
+                throw new InvalidOperationException(hasKey
+                    ? L.T("This repo has an encrypted backup. Tick \"Also encrypt with a password\" and enter its password to connect.", "Repo này có bản sao lưu mã hoá. Hãy tích \"Mã hoá thêm bằng mật khẩu\" và nhập đúng mật khẩu cũ để nối vào.")
+                    : L.T("This repo has an unencrypted backup. Untick encryption to connect to it.", "Repo này có bản sao lưu không mã hoá. Hãy bỏ tích mã hoá để nối vào."));
+            }
             if (plain)
             {
                 File.WriteAllText(Path.Combine(RepoDir, "README.md"), PlainReadme, new UTF8Encoding(false));

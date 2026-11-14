@@ -247,7 +247,11 @@ partial class MainForm
         effort.Level = L.Get("chat.effort", "");
         effort.Changed += lv => L.Set("chat.effort", lv ?? "");
         syncModel();
-        bar.Controls.AddRange(new Control[] { hint, effort, bModel, bTask, bStop, bAsk });
+        // Chọn project ngay dưới ô chat: chọn thư mục là giao việc được luôn
+        bProject = Btn("", 210); bProject.Dock = DockStyle.Left; bProject.BackColor = Panel2; bProject.TextAlign = ContentAlignment.MiddleLeft; bProject.AutoEllipsis = true;
+        bProject.Click += (s, e) => ProjectPicker();
+        SyncProject();
+        bar.Controls.AddRange(new Control[] { hint, effort, bModel, bProject, bTask, bStop, bAsk });
         card.Controls.Add(chatInput); card.Controls.Add(bar);
         // Thanh duyệt kế hoạch: chỉ hiện khi có kế hoạch đang chờ
         var approveBar = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 44, BackColor = Bg, Visible = false, Padding = new Padding(0, 6, 0, 0) };
@@ -317,6 +321,65 @@ partial class MainForm
 
     WsProject CurProject { get { return Workspace.Project(curProjectId) ?? Workspace.Project(Workspace.GeneralId); } }
 
+    // ---------- Ô chọn project dưới thanh chat ----------
+    Button bProject;
+    void SyncProject()
+    {
+        if (bProject == null) return;
+        var p = CurProject;
+        bProject.Text = (p.Path != null ? "📁 " + p.Name : L.T("📁 Pick a project", "📁 Chọn project")) + "  ▾";
+        bProject.ForeColor = p.Path != null ? Ink : Color.FromArgb(234, 179, 8);
+        new ToolTip().SetToolTip(bProject, p.Path ?? L.T("No folder – pick a project to do tasks", "Chưa có thư mục – chọn project để giao việc"));
+    }
+
+    void UseFolder(string folder)
+    {
+        try { var p = Workspace.ProjectForFolder(folder); curProjectId = p.Id; OpenChat(null); chatInput.Focus(); }
+        catch (Exception ex) { Say(ex.Message, Bad); }
+    }
+
+    void ProjectPicker()
+    {
+        var menu = new ContextMenuStrip { Renderer = new DarkMenu(), ShowImageMargin = false, Font = new Font("Segoe UI", 10f), MaximumSize = new Size(720, 640) };
+        var curPath = CurProject.Path;
+        var listed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        Action<string> head = t => { if (menu.Items.Count > 0) menu.Items.Add(new ToolStripSeparator()); menu.Items.Add(new ToolStripMenuItem(t) { Enabled = false, ForeColor = Dim }); };
+        Action<string, string, Action> item = (text, path, go) =>
+        {
+            bool on = path != null && string.Equals(path, curPath, StringComparison.OrdinalIgnoreCase);
+            var mi = new ToolStripMenuItem((on ? "✓  " : "     ") + text + (path != null ? "      " + path : ""), null, (s, e) => go()) { ForeColor = Ink };
+            menu.Items.Add(mi);
+        };
+        var mine = Workspace.LiveProjects(false).Where(p => p.Path != null && Directory.Exists(p.Path)).ToList();
+        if (mine.Count > 0)
+        {
+            head(L.T("Your projects", "Project của bạn"));
+            foreach (var p in mine) { var pp = p; listed.Add(p.Path); item(p.Name, p.Path, () => { curProjectId = pp.Id; OpenChat(null); chatInput.Focus(); }); }
+        }
+        var cc = Workspace.ClaudeCodeFolders(15).Where(x => !listed.Contains(x.Item1)).ToList();
+        if (cc.Count > 0)
+        {
+            head(L.T("Recently opened in Claude Code", "Mở gần đây bằng Claude Code"));
+            foreach (var x in cc) { var f = x.Item1; listed.Add(f); item(Path.GetFileName(f), f, () => UseFolder(f)); }
+        }
+        try
+        {
+            var bp = Brain.Projects(null).Where(x => Directory.Exists(x.Path) && !listed.Contains(x.Path.TrimEnd('\\'))).OrderByDescending(x => x.LastWrite).Take(10).ToList();
+            if (bp.Count > 0)
+            {
+                head(L.T("Other projects on this PC", "Dự án khác trên máy"));
+                foreach (var x in bp) { var f = x.Path; item(x.Name ?? Path.GetFileName(f), f, () => UseFolder(f)); }
+            }
+        }
+        catch { }
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add(new ToolStripMenuItem(L.T("📂  Another folder…", "📂  Thư mục khác…"), null, (s, e) =>
+        { using (var d = new FolderBrowserDialog()) if (d.ShowDialog(this) == DialogResult.OK) UseFolder(d.SelectedPath); }) { ForeColor = Ink });
+        menu.Items.Add(new ToolStripMenuItem(L.T("＋  New project…", "＋  Project mới…"), null, (s, e) => NewProjectDialog()) { ForeColor = Ink });
+        menu.Items.Add(new ToolStripMenuItem(L.T("     General chat (no folder, ask only)", "     Trò chuyện chung (không thư mục, chỉ hỏi)"), null, (s, e) => { curProjectId = Workspace.GeneralId; OpenChat(null); }) { ForeColor = Dim });
+        menu.Show(bProject, new Point(0, 0), ToolStripDropDownDirection.AboveRight);
+    }
+
     // ---------- Hiển thị ----------
     void OpenChat(WsChat c)
     {
@@ -334,9 +397,10 @@ partial class MainForm
                     "• Hỏi: hỏi về dự án, tài liệu và ghi nhớ đã xác minh. Chỉ đọc.\n" +
                     "• Giao việc: mô tả việc cần làm. Claude lập kế hoạch trước, chỉ bắt đầu khi bạn duyệt. Claude được sửa file trong project này và chạy test, nhưng không bao giờ đẩy code, commit, phát hành hay xoá.\n" +
                     "• Rê chuột vào project hoặc chat ở thanh bên, bấm ⋯ để đổi tên, phân nhánh, chuyển, lưu trữ hoặc xoá. Bấm chuột phải vào tin nhắn để phân nhánh từ đó."), Dim);
-            if (proj.Path == null) Say(L.T("Tip: tasks need a project with a folder. Create one with + New project.", "Mẹo: giao việc cần một project có thư mục. Tạo bằng + Project mới."), Dim);
+            if (proj.Path == null) Say(L.T("Tip: tasks need a project folder. Pick one with 📁 under the chat box.", "Mẹo: giao việc cần thư mục project. Chọn ở ô 📁 dưới khung chat."), Dim);
         }
         else foreach (var m in c.Messages) RenderMsg(m);
+        SyncProject();
         RefreshTree();
         UpdateButtons();
     }
@@ -437,7 +501,7 @@ partial class MainForm
     {
         var t = chatInput.Text.Trim(); var proj = CurProject;
         if (t.Length == 0) { Say(L.T("Describe the task in the box below first.", "Hãy mô tả việc cần làm ở ô bên dưới trước."), Dim); return; }
-        if (proj.Path == null || !Directory.Exists(proj.Path)) { Say(L.T("Tasks run inside a project folder. Pick or create a project with a folder first.", "Việc phải làm trong thư mục của một project. Hãy chọn hoặc tạo project có thư mục trước."), Bad); return; }
+        if (proj.Path == null || !Directory.Exists(proj.Path)) { Say(L.T("Tasks run inside a project folder. Pick one below 📁, then press send again.", "Việc phải làm trong thư mục của một project. Chọn project ở ô 📁 bên dưới rồi bấm gửi lại."), Bad); ProjectPicker(); return; }
         if (CurBusy || !EnsureReady()) return;
         var c = EnsureChat();
         chatInput.Clear();

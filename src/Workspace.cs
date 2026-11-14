@@ -109,6 +109,53 @@ static class Workspace
         return proj;
     }
 
+    /// <summary>Project gắn với thư mục này (tự tạo nếu chưa có). Thư mục có sẵn nên không bao giờ bị app xoá.</summary>
+    public static WsProject ProjectForFolder(string folder)
+    {
+        var path = Path.GetFullPath(folder).TrimEnd('\\');
+        var have = Data.Projects.FirstOrDefault(p => p.Deleted == null && string.Equals(p.Path, path, StringComparison.OrdinalIgnoreCase));
+        if (have != null) { if (have.Archived) { have.Archived = false; Save(); } return have; }
+        var name = Path.GetFileName(path); if (string.IsNullOrEmpty(name)) name = path;
+        return CreateProject(name, path, false, false, null);
+    }
+
+    static readonly System.Text.RegularExpressions.Regex CwdRx = new System.Text.RegularExpressions.Regex("\"cwd\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"");
+    /// <summary>Các thư mục bạn từng làm việc bằng Claude Code (đọc trường cwd trong lịch sử phiên ~/.claude/projects), mới nhất trước.</summary>
+    public static List<Tuple<string, DateTime>> ClaudeCodeFolders(int max)
+    {
+        var r = new List<Tuple<string, DateTime>>();
+        try
+        {
+            var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude", "projects");
+            if (!Directory.Exists(root)) return r;
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var d in new DirectoryInfo(root).GetDirectories())
+            {
+                var newest = d.GetFiles("*.jsonl").OrderByDescending(f => f.LastWriteTime).FirstOrDefault();
+                if (newest == null) continue;
+                string cwd = null;
+                try
+                {
+                    using (var fs = new FileStream(newest.FullName, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                    using (var sr = new StreamReader(fs, Encoding.UTF8))
+                        for (int i = 0; i < 60 && cwd == null; i++)
+                        {
+                            var line = sr.ReadLine(); if (line == null) break;
+                            var m = CwdRx.Match(line); if (m.Success) cwd = System.Text.RegularExpressions.Regex.Unescape(m.Groups[1].Value);
+                        }
+                }
+                catch { }
+                if (cwd == null || !Directory.Exists(cwd)) continue;
+                cwd = Path.GetFullPath(cwd).TrimEnd('\\');
+                // Bỏ thư mục tạm và thư mục dữ liệu của chính app (nơi trò chuyện chung chạy)
+                if (cwd.StartsWith(Path.GetTempPath().TrimEnd('\\'), StringComparison.OrdinalIgnoreCase) || cwd.StartsWith(Cleaner.DataDir.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase)) continue;
+                if (seen.Add(cwd)) r.Add(Tuple.Create(cwd, newest.LastWriteTime));
+            }
+        }
+        catch { }
+        return r.OrderByDescending(x => x.Item2).Take(max).ToList();
+    }
+
     static void Git(string dir, string args)
     {
         try

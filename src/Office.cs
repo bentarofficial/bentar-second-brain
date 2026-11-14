@@ -55,12 +55,7 @@ class OfficeView : Control
         Func<string, string, string, string, string[], Color, Color, float, float, bool, Staff> S = (k, n, r, link, cl, shirt, hair, x, y, skirt) =>
             new Staff { Key = k, Name = n, Role = r, LinkName = link, Clients = cl, Shirt = shirt, Hair = hair, DeskX = x, DeskY = y, Skirt = skirt };
         Team.Add(S("brain", "Second Brain", L.T("Manager · thinks with your Claude plan", "Trưởng phòng · suy nghĩ bằng gói Claude của bạn"), null, new[] { "Second Brain" }, Color.FromArgb(99, 102, 241), Color.FromArgb(40, 30, 30), 7.3f, 1.9f, true));
-        Team.Add(S("claude", "Claude Code", L.T("Senior engineer", "Kỹ sư chính"), "Claude Code", new[] { "claude-code" }, Color.FromArgb(217, 119, 87), Color.FromArgb(60, 40, 25), 6.2f, 6.0f, false));
-        Team.Add(S("codex", "Codex", L.T("Engineer", "Kỹ sư"), "Codex", new[] { "codex", "codex-mcp-client" }, Color.FromArgb(16, 163, 127), Color.FromArgb(25, 25, 30), 9.7f, 6.0f, true));
-        Team.Add(S("gemini", "Gemini CLI", L.T("Engineer", "Kỹ sư"), "Gemini CLI", new[] { "gemini-cli", "gemini" }, Color.FromArgb(66, 133, 244), Color.FromArgb(90, 60, 30), 13.2f, 6.0f, false));
-        Team.Add(S("cursor", "Cursor", L.T("Editor specialist", "Chuyên viên biên tập code"), "Cursor", new[] { "cursor" }, Color.FromArgb(70, 75, 90), Color.FromArgb(20, 20, 20), 6.2f, 9.3f, true));
-        Team.Add(S("windsurf", "Windsurf", L.T("Editor specialist", "Chuyên viên biên tập code"), "Windsurf", new[] { "windsurf" }, Color.FromArgb(20, 160, 150), Color.FromArgb(120, 80, 40), 9.7f, 9.3f, false));
-        Team.Add(S("cowork", "Claude Desktop · Cowork", L.T("Office & documents (Cowork)", "Văn phòng & tài liệu (Cowork)"), "Claude Desktop", new[] { "claude-ai", "claude desktop", "claude-desktop" }, Color.FromArgb(204, 120, 92), Color.FromArgb(70, 45, 30), 13.2f, 9.3f, true));
+        Team.Add(S("claude", "Claude Code", L.T("Engineer · your one coding agent", "Kỹ sư · nhân sự code duy nhất"), "Claude Code", new[] { "claude-code" }, Color.FromArgb(217, 119, 87), Color.FromArgb(60, 40, 25), 9.7f, 7.4f, false));
         Team.Add(S("tools", L.T("Tools & scripts", "Công cụ & script"), L.T("Automation (HTTP, sb command)", "Tự động hoá (HTTP, lệnh sb)"), null, new[] { "cli", "http", "rest", "n8n", "make", "agent", "protocol-test" }, Color.FromArgb(139, 92, 246), Color.FromArgb(50, 50, 60), 2.0f, 9.6f, false));
         // Dãy hậu cần: các chức năng của app cũng là nhân viên thật
         Func<string, string, string, string, string[], string[], Color, Color, float, bool, Staff> I = (k, n, r, page, cl, acts, shirt, hair, x, skirt) =>

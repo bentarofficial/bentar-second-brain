@@ -390,7 +390,7 @@ partial class MainForm
     {
         var p = Page();
         var bar = Row(DockStyle.Top, 48);
-        var bAuto = Btn(L.T("Auto-connect agents on this PC", "Tự cắm các agent trên máy"), 220, true);
+        var bAuto = Btn(L.T("Connect Claude Code", "Kết nối Claude Code"), 220, true);
         var bShow = Btn(L.T("Show key", "Hiện mã khoá"), 130);
         var bCopy = Btn(L.T("Copy guide", "Chép hướng dẫn"), 140);
         var bStart = Btn(L.T("Start station", "Bật trạm phát"), 130);
@@ -424,16 +424,10 @@ partial class MainForm
             L.T("ONE BRAIN – EVERY AGENT AND TOOL PLUGS IN", "MỘT BỘ NÃO – MỌI AGENT VÀ CÔNG CỤ CẮM VÀO"),
             L.T("Key: ", "Mã khoá: ") + token,
             "",
-            L.T("1) Coding agents with MCP support (Claude Code, Codex, Gemini CLI, Cursor, Claude Desktop...)", "1) Coding agent hỗ trợ MCP (Claude Code, Codex, Gemini CLI, Cursor, Claude Desktop...)"),
-            L.T("   Click \"Auto-connect agents on this PC\", or add it yourself:", "   Bấm \"Tự cắm các agent trên máy\", hoặc tự thêm:"),
+            L.T("1) Claude Code – your one coding agent", "1) Claude Code – nhân sự code duy nhất"),
+            L.T("   Click \"Connect Claude Code\", or add it yourself:", "   Bấm \"Kết nối Claude Code\", hoặc tự thêm:"),
             "   Claude Code (stdio):  claude mcp add --scope user second-brain -- \"" + exe + "\" /mcp",
             "   Claude Code (HTTP):   claude mcp add --transport http second-brain " + url + "/mcp --header \"Authorization: Bearer " + token + "\"",
-            "   Codex (~/.codex/config.toml):",
-            "     [mcp_servers.second-brain]",
-            "     command = '" + exe + "'",
-            "     args = [\"/mcp\"]",
-            "   Cursor / Claude Desktop / Windsurf / Gemini (JSON):",
-            "     \"second-brain\": { \"command\": \"" + exe.Replace("\\", "\\\\") + "\", \"args\": [\"/mcp\"] }",
             "",
             L.T("2) Agents with MCP over HTTP", "2) Agent hỗ trợ MCP qua HTTP"),
             "   URL: " + url + "/mcp     Header: Authorization: Bearer " + token,
@@ -465,7 +459,14 @@ partial class MainForm
         var bar = Row(DockStyle.Top, 52);
         var bSetup = Btn(L.T("Set up backup", "Thiết lập sao lưu"), 170, true); var bNow = Btn(L.T("Back up now", "Sao lưu ngay"), 130); var bVerify = Btn(L.T("Verify backup", "Kiểm tra bản sao lưu"), 180); var bRestore = Btn(L.T("Restore", "Khôi phục"), 120);
         var bPlain = Btn(L.T("Remove encryption", "Bỏ mã hoá"), 120);
-        bar.Controls.AddRange(new Control[] { bSetup, bNow, bVerify, bRestore, bPlain });
+        var bOff = Btn(L.T("Disconnect", "Ngắt kết nối"), 130);
+        bar.Controls.AddRange(new Control[] { bSetup, bNow, bVerify, bRestore, bPlain, bOff });
+        bOff.Click += (s, e) =>
+        {
+            if (!Backup.Configured) { MessageBox.Show(this, L.T("Backup is not set up.", "Chưa thiết lập sao lưu."), Text); return; }
+            if (MessageBox.Show(this, L.T("Disconnect the backup on this PC? The repo on GitHub is NOT deleted. Then click \"Set up backup\" to pick another repo.", "Ngắt sao lưu trên máy này? Repo trên GitHub KHÔNG bị xoá. Sau đó bấm \"Thiết lập sao lưu\" để chọn repo khác."), Text, MessageBoxButtons.YesNo) != DialogResult.Yes) return;
+            Backup.Disconnect(); FillBackup();
+        };
         bPlain.Click += async (s, e) =>
         {
             if (!Backup.Encrypted) { MessageBox.Show(this, L.T("The backup is not encrypted.", "Bản sao lưu hiện không mã hoá."), Text); return; }
